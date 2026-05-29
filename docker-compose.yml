@@ -1,0 +1,12 @@
+# Local dev infrastructure for the hot tier (and warm tier, once it lands).
+# Mirrors the GKE deployment with the same container images. MongoDB is NOT here:
+# it runs on MongoDB Atlas in both dev and prod (set EZRA_MONGODB_URI in .env).
+#
+#   docker compose up -d
+#
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
