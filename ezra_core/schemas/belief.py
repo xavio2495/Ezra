@@ -54,3 +54,13 @@ class ContradictionEvent(BaseModel):
     existing_trust: float
     new_trust: float
     graph_state_snapshot_id: str
+
+
+class BeliefSnapshot(BaseModel):
+    """The (optionally scope-filtered) active belief state of a session graph,
+    current or reconstructed as-of a prior turn. ``commitments`` excludes
+    superseded and redacted entries."""
+
+    session_graph_id: str
+    as_of_turn: Optional[int] = None
+    commitments: list[Commitment] = Field(default_factory=list)

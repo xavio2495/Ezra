@@ -1,4 +1,4 @@
-"""Memory models — episodic and semantic. Procedural is added with its store."""
+"""Memory models — episodic, semantic, and procedural."""
 
 from __future__ import annotations
 
@@ -35,3 +35,16 @@ class SemanticFact(BaseModel):
     created_at: datetime
     updated_at: datetime
     superseded_by: Optional[str] = None
+
+
+class ProceduralRule(BaseModel):
+    """Inferred behavioural rule, loaded by intent-pattern / scope match."""
+
+    id: str
+    user_id: str
+    pattern: str  # intent pattern this rule applies to
+    rule: str
+    topics: list[str] = Field(default_factory=list)
+    source_session_graph_ids: list[str] = Field(default_factory=list)
+    confidence: float = Field(ge=0, le=1)
+    created_at: datetime
