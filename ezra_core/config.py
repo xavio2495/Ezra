@@ -6,6 +6,9 @@ vars (documented in .env.example for later sessions) are ignored, not errors.
 
 from __future__ import annotations
 
+from typing import Optional
+
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -45,3 +48,26 @@ class EzraSettings(BaseSettings):
 
     # Policy
     policy_engine_enabled: bool = True
+
+    # Meta-agents (both enabled by default in v4.1)
+    meta_agent_learning_enabled: bool = True
+    meta_agent_lifecycle_enabled: bool = True
+    core_promotion_access_count: int = 3
+    lifecycle_schedule_active_minutes: int = 5
+    lifecycle_schedule_closed_minutes: int = 60
+
+    # Lifecycle
+    default_archival_threshold_days: int = 90
+    default_belief_retention_days: Optional[int] = None
+
+    # Observability
+    phoenix_endpoint: str = "http://localhost:6006/v1/traces"
+    tracing_enabled: bool = True
+
+    @field_validator("default_belief_retention_days", mode="before")
+    @classmethod
+    def _blank_is_infinite(cls, v):
+        # `.env` sets EZRA_DEFAULT_BELIEF_RETENTION_DAYS= (blank) to mean infinite.
+        if isinstance(v, str) and v.strip() == "":
+            return None
+        return v

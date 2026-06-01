@@ -118,6 +118,18 @@ async def test_run_turn_with_warm_recall():
     assert "tyre deg trending high" in warm_text
 
 
+async def test_run_turn_emits_router_step_spans():
+    from ezra_core.observability.tracer import EzraTracer
+
+    tracer, exporter = EzraTracer.in_memory()
+    router, *_ = await _router(tracer=tracer)
+    await router.run_turn(agent=_agent(["tyres"]), user_input="status?")
+
+    span_names = {s.name for s in exporter.get_finished_spans()}
+    assert {"router.belief_check", "router.hydrate", "router.assemble",
+            "router.llm", "router.write_back"} <= span_names
+
+
 async def test_run_turn_mesh_fetch_policy_denied():
     connector = SnowflakeConnector("wh.inventory", executor=lambda sql: [])
     router, *_ = await _router(policy=PolicyEngine(enabled=True), mesh=connector)

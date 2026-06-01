@@ -30,6 +30,7 @@ from ezra_core.belief.replay import snapshot_now
 from ezra_core.belief.store import BeliefStore
 from ezra_core.mesh.base import BaseConnector
 from ezra_core.memory.procedural import ProceduralStore
+from ezra_core.observability.tracer import EzraTracer, RouterStep
 from ezra_core.memory.semantic import SemanticStore
 from ezra_core.policy.engine import PolicyEngine
 from ezra_core.schemas.belief import Commitment, Contradiction, Resolution
@@ -251,6 +252,7 @@ class Router:
         context_limit: int = 128000,
         salience_decay_rate: float = 0.1,
         warm_limit: int = 5,
+        tracer: Optional[EzraTracer] = None,
     ) -> None:
         self._hot = hot
         self._belief = belief_store
@@ -261,6 +263,7 @@ class Router:
         self._context_limit = context_limit
         self._decay = salience_decay_rate
         self._warm_limit = warm_limit
+        self._tracer = tracer or EzraTracer.disabled()
 
     async def run_turn(
         self,
@@ -274,52 +277,59 @@ class Router:
     ) -> TurnResult:
         scope = set(agent.permission_scope)
         graph_id = agent.session_graph_id
+        agent_id = agent.agent_id
 
         # Step 5 (Fetch) — policy-gated; only if a mesh query was requested.
         mesh_result: Optional[MeshResult] = None
         if mesh_query and self._mesh is not None:
-            mesh_result = await fetch(
-                connector=self._mesh,
-                policy=self._policy,
-                query=mesh_query,
-                agent_id=agent.agent_id,
-                permission_scope=list(agent.permission_scope),
-                topics=mesh_topics,
-                as_of=as_of,
-            )
+            with self._tracer.span(RouterStep.FETCH, agent_id=agent_id):
+                mesh_result = await fetch(
+                    connector=self._mesh,
+                    policy=self._policy,
+                    query=mesh_query,
+                    agent_id=agent_id,
+                    permission_scope=list(agent.permission_scope),
+                    topics=mesh_topics,
+                    as_of=as_of,
+                )
 
         # Step 3 (Belief) — scope-filtered active commitments become pinned context.
-        belief_snap = await snapshot_now(self._belief, graph_id, scope_topics=scope)
+        with self._tracer.span(RouterStep.BELIEF_CHECK, agent_id=agent_id):
+            belief_snap = await snapshot_now(self._belief, graph_id, scope_topics=scope)
 
         # Step 4 (Hydrate) — warm recall + recent hot turns.
-        warm_summaries = []
-        if self._warm is not None:
-            warm_summaries = await self._warm.recall(
-                session_graph_id=graph_id,
-                query=user_input,
-                scope_topics=scope,
-                limit=self._warm_limit,
-            )
-        hot_turns = await self._hot.get_turns(graph_id, agent.agent_id)
+        with self._tracer.span(RouterStep.HYDRATE, agent_id=agent_id):
+            warm_summaries = []
+            if self._warm is not None:
+                warm_summaries = await self._warm.recall(
+                    session_graph_id=graph_id,
+                    query=user_input,
+                    scope_topics=scope,
+                    limit=self._warm_limit,
+                )
+            hot_turns = await self._hot.get_turns(graph_id, agent_id)
 
         # Step 6 (Assemble) — salience-ranked, budget-capped.
-        context = self._assemble(
-            agent=agent,
-            system_prompt=system_prompt,
-            beliefs=belief_snap.commitments,
-            warm_summaries=warm_summaries,
-            hot_turns=hot_turns,
-            mesh_result=mesh_result,
-            user_input=user_input,
-        )
+        with self._tracer.span(RouterStep.ASSEMBLE, agent_id=agent_id):
+            context = self._assemble(
+                agent=agent,
+                system_prompt=system_prompt,
+                beliefs=belief_snap.commitments,
+                warm_summaries=warm_summaries,
+                hot_turns=hot_turns,
+                mesh_result=mesh_result,
+                user_input=user_input,
+            )
 
         # Step 7 (LLM).
-        response = await self._llm.complete(self._to_messages(context, user_input))
+        with self._tracer.span(RouterStep.LLM, agent_id=agent_id):
+            response = await self._llm.complete(self._to_messages(context, user_input))
 
         # Step 8 (Write-back) — record the turn in the hot tier.
-        await self._hot.append_turn(
-            graph_id, agent.agent_id, {"input": user_input, "response": response}
-        )
+        with self._tracer.span(RouterStep.WRITE_BACK, agent_id=agent_id):
+            await self._hot.append_turn(
+                graph_id, agent_id, {"input": user_input, "response": response}
+            )
 
         return TurnResult(
             agent_id=agent.agent_id,

@@ -14,6 +14,9 @@ dependencies = [
     "litellm>=1.50",
     "fastapi>=0.115",
     "uvicorn>=0.30",
+    "opentelemetry-api>=1.27",
+    "opentelemetry-sdk>=1.27",
+    "opentelemetry-exporter-otlp-proto-http>=1.27",
 ]
 
 [dependency-groups]
