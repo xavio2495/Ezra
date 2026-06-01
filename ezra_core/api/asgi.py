@@ -10,15 +10,38 @@ With ``EZRA_MONGODB_URI`` set it builds the real cold-tier-backed surface
 app so the container is live for readiness probes before Atlas wiring. The
 contradiction checker (needs the opt-in ``ml`` deps) and mesh connectors are
 left unconfigured here — they are wired per-deployment as needed.
+
+On GKE, secrets are delivered as files by the Secret Manager CSI add-on (it
+mounts each Secret Manager secret as a file; it does NOT sync a Kubernetes
+Secret). ``_load_secret_files`` reads that mount and exports each file as the
+matching ``EZRA_*`` env var (``ezra-mongodb-uri`` -> ``EZRA_MONGODB_URI``) before
+settings are read. ``setdefault`` means an explicit env var still wins, and the
+whole step is a no-op when the mount is absent (local/dev).
 """
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 from ezra_core.api.app import create_app
 from ezra_core.config import EzraSettings
 
+SECRETS_DIR = os.environ.get("EZRA_SECRETS_DIR", "/mnt/secrets-store")
+
+
+def _load_secret_files(directory: str = SECRETS_DIR) -> None:
+    path = Path(directory)
+    if not path.is_dir():
+        return
+    for entry in path.iterdir():
+        if entry.is_file():
+            env_name = entry.name.upper().replace("-", "_")
+            os.environ.setdefault(env_name, entry.read_text().strip())
+
 
 def build_app():
+    _load_secret_files()
     settings = EzraSettings()
     token = settings.api_bearer_token or None
 

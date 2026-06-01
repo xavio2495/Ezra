@@ -21,3 +21,14 @@ resource "google_secret_manager_secret_iam_member" "secret_accessor" {
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${var.runtime_gsa_email}"
 }
+
+# The GKE node service account must be able to PULL the API image from Artifact
+# Registry. cloud-platform oauth scope alone is NOT sufficient — the SA needs the
+# reader IAM role, or pods ImagePullBackOff with 403.
+resource "google_artifact_registry_repository_iam_member" "node_puller" {
+  project    = var.project_id
+  location   = google_artifact_registry_repository.ezra.location
+  repository = google_artifact_registry_repository.ezra.repository_id
+  role       = "roles/artifactregistry.reader"
+  member     = "serviceAccount:${var.project_number}-compute@developer.gserviceaccount.com"
+}
