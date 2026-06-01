@@ -46,3 +46,10 @@ __pycache__/
 # secrets — GCP service-account keys/certs, minted tokens. NEVER commit.
 /secrets/
 *.jwk.json
+
+# terraform — state + local vars (may contain sensitive values). Lock file IS committed.
+deploy/terraform/.terraform/
+deploy/terraform/*.tfstate
+deploy/terraform/*.tfstate.*
+deploy/terraform/terraform.tfvars
+deploy/terraform/crash.log
