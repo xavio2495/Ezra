@@ -1,0 +1,8 @@
+# Copy to terraform.tfvars and adjust. terraform.tfvars is gitignored.
+project_id     = "ezra-498021"
+project_number = "554390343398"
+region         = "us-east1"
+zone           = "us-east1-c"
+
+# Keep false until you're ready to spin up (and pay for) the cluster.
+create_cluster = false

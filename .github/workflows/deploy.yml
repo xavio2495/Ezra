@@ -1,0 +1,59 @@
+# Continuous deploy to GKE — RELEASE BRANCH ONLY.
+#
+# GKE is fed exclusively from `release`: this workflow triggers on pushes to
+# release, and the keyless WIF provider (deploy/terraform/github_wif.tf) only
+# mints GCP credentials for refs/heads/release — a run on any other branch (even
+# via workflow_dispatch) cannot authenticate. The image is tagged with the
+# release commit SHA, so the deployed code/product version is pinned to release.
+name: deploy-gke
+
+on:
+  push:
+    branches: [release]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: ezra-498021
+  REGION: us-east1
+  ZONE: us-east1-c
+  CLUSTER: ezra
+  IMAGE: us-east1-docker.pkg.dev/ezra-498021/ezra/ezra-api
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/554390343398/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+          service_account: ezra-deployer@ezra-498021.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${REGION}-docker.pkg.dev --quiet
+
+      - name: Build & push image (tagged with release SHA)
+        run: |
+          docker build -f deploy/docker/Dockerfile \
+            -t ${IMAGE}:${GITHUB_SHA} -t ${IMAGE}:latest .
+          docker push ${IMAGE}:${GITHUB_SHA}
+          docker push ${IMAGE}:latest
+
+      - uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.CLUSTER }}
+          location: ${{ env.ZONE }}
+
+      - name: Apply manifests & roll out
+        run: |
+          kubectl apply -k deploy/k8s
+          kubectl -n ezra set image deployment/ezra-api ezra-api=${IMAGE}:${GITHUB_SHA}
+          kubectl -n ezra rollout status deployment/ezra-api --timeout=180s

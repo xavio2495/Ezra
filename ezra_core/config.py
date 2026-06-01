@@ -64,6 +64,12 @@ class EzraSettings(BaseSettings):
     phoenix_endpoint: str = "http://localhost:6006/v1/traces"
     tracing_enabled: bool = True
 
+    # REST API
+    api_enabled: bool = True
+    api_host: str = "0.0.0.0"
+    api_port: int = 8080
+    api_bearer_token: str = ""
+
     @field_validator("default_belief_retention_days", mode="before")
     @classmethod
     def _blank_is_infinite(cls, v):

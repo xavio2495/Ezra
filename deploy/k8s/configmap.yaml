@@ -1,0 +1,13 @@
+# Non-secret runtime config. Secrets (Atlas URI, Gemini key, bearer token) come
+# from Secret Manager via the SecretProviderClass, not from here.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ezra-config
+  namespace: ezra
+data:
+  EZRA_REDIS_URL: "redis://redis:6379"
+  EZRA_QDRANT_URL: "http://qdrant:6333"
+  EZRA_MONGODB_DB: "ezra"
+  EZRA_API_PORT: "8080"
+  EZRA_TRACING_ENABLED: "false"

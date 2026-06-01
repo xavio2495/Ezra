@@ -1,0 +1,74 @@
+# Ezra Core REST API. Runs as the WIF-bound KSA, pulls secrets from Secret
+# Manager (CSI volume → synced ezra-secrets), reads non-secret config from the
+# ConfigMap. Exposed via a LoadBalancer Service (no domain needed for the demo;
+# swap for an Ingress + ManagedCertificate when a hostname exists).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ezra-api
+  namespace: ezra
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ezra-api
+  template:
+    metadata:
+      labels:
+        app: ezra-api
+    spec:
+      serviceAccountName: ezra-api
+      containers:
+        - name: ezra-api
+          # Overridden by kustomize `images:` / the deploy script.
+          image: ezra-api:latest
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: ezra-config
+            - secretRef:
+                name: ezra-secrets
+          volumeMounts:
+            - name: secrets-store
+              mountPath: /mnt/secrets-store
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /ezra/health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /ezra/health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: secrets-store
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: ezra-secrets
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ezra-api
+  namespace: ezra
+spec:
+  type: LoadBalancer
+  selector:
+    app: ezra-api
+  ports:
+    - port: 80
+      targetPort: 8080
