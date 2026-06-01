@@ -17,6 +17,12 @@ class EzraSettings(BaseSettings):
         extra="ignore",
     )
 
+    # LLM
+    llm_model: str = "gemini/gemini-2.0-flash"
+    llm_api_key: str = ""
+    meta_agent_model: str = "gemini/gemini-2.0-flash-lite"
+    embedding_model: str = "gemini/text-embedding-004"
+
     # Storage
     mongodb_uri: str = ""
     mongodb_db: str = "ezra"
@@ -27,3 +33,15 @@ class EzraSettings(BaseSettings):
     context_limit: int = 128000
     hot_max_turns: int = 8
     salience_decay_rate: float = 0.1
+    warm_ttl_hours: int = 24
+
+    # Contradiction detection (two-pass) + reconciler
+    nli_model: str = "cross-encoder/nli-deberta-v3-base"
+    nli_device: str = "auto"
+    embedding_similarity_threshold: float = 0.85
+    nli_confidence_threshold: float = 0.7
+    default_merge_strategy: str = "last_write_wins"
+    manual_resolution_timeout_seconds: int = 30
+
+    # Policy
+    policy_engine_enabled: bool = True

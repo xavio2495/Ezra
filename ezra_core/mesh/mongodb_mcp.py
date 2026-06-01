@@ -1,0 +1,62 @@
+"""MongoDB connector (Atlas via the official MCP server in production; here it
+runs find/aggregate against an Atlas collection). MongoDB has NO query-time
+time-travel — ``time_travel_available`` is always False, and ``as_of`` is
+ignored. For historical state use versioned-document patterns at the app layer
+(see docs/connectors.md).
+"""
+
+from __future__ import annotations
+
+import json
+from datetime import datetime
+from typing import Optional
+
+from ezra_core.mesh.base import BaseConnector
+from ezra_core.schemas.mesh import MeshResult
+
+
+class MongoMcpConnector(BaseConnector):
+    time_travel_available = False
+
+    def __init__(
+        self,
+        collection,
+        *,
+        source_name: str = "mongodb",
+        limit: int = 50,
+        topics: Optional[list[str]] = None,
+    ) -> None:
+        self._c = collection
+        self._source = source_name
+        self._limit = limit
+        self._topics = topics or []
+
+    @staticmethod
+    def _parse_filter(query: str) -> dict:
+        q = query.strip()
+        if q.startswith("{"):
+            try:
+                return json.loads(q)
+            except json.JSONDecodeError:
+                return {}
+        return {}
+
+    async def fetch(
+        self,
+        query: str,
+        agent_id: str,
+        permission_scope: list[str],
+        as_of: Optional[datetime] = None,
+    ) -> MeshResult:
+        filt = self._parse_filter(query)
+        cursor = self._c.find(filt).limit(self._limit)
+        docs = []
+        async for doc in cursor:
+            doc.pop("_id", None)
+            docs.append(doc)
+
+        return MeshResult(
+            data=docs,
+            provenance=self._provenance(source=f"mongodb:{self._source}"),
+            topics=self._topics,
+        )

@@ -37,6 +37,19 @@ class SemanticFact(BaseModel):
     superseded_by: Optional[str] = None
 
 
+class WarmSummary(BaseModel):
+    """Compressed prior turn / topic summary held in the warm tier (Qdrant).
+    ``id`` must be a UUID string (Qdrant point id)."""
+
+    id: str
+    session_graph_id: str
+    agent_id: Optional[str] = None
+    summary: str
+    topics: list[str] = Field(default_factory=list)
+    salience: float = Field(default=1.0, ge=0, le=1)
+    created_at: datetime
+
+
 class ProceduralRule(BaseModel):
     """Inferred behavioural rule, loaded by intent-pattern / scope match."""
 

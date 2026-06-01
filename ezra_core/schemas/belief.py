@@ -42,8 +42,27 @@ class Resolution(BaseModel):
     decision: Literal["accept_new", "keep_existing", "escalate", "fallback"]
     fallback_strategy: Optional[Literal["last_write_wins", "highest_trust"]] = None
     resolved_commitment_id: Optional[str] = None
-    merge_strategy_used: str
+    merge_strategy_used: str = "custom"
     resolver_metadata: dict[str, Any] = Field(default_factory=dict)
+
+    # Convenience constructors used by custom resolvers (see README).
+    @classmethod
+    def accept_new(cls, **meta: Any) -> "Resolution":
+        return cls(decision="accept_new", resolver_metadata=meta)
+
+    @classmethod
+    def keep_existing(cls, **meta: Any) -> "Resolution":
+        return cls(decision="keep_existing", resolver_metadata=meta)
+
+    @classmethod
+    def escalate(cls, **meta: Any) -> "Resolution":
+        return cls(decision="escalate", resolver_metadata=meta)
+
+    @classmethod
+    def fallback_to(
+        cls, strategy: Literal["last_write_wins", "highest_trust"], **meta: Any
+    ) -> "Resolution":
+        return cls(decision="fallback", fallback_strategy=strategy, resolver_metadata=meta)
 
 
 class ContradictionEvent(BaseModel):

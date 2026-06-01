@@ -9,6 +9,11 @@ dependencies = [
     "pydantic-settings>=2.2",
     "pymongo>=4.10",
     "redis>=5.0",
+    "httpx>=0.27",
+    "qdrant-client>=1.12",
+    "litellm>=1.50",
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
 ]
 
 [dependency-groups]
@@ -16,6 +21,12 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
     "fakeredis>=2.23",
+]
+# Heavy local-inference models (NLI DeBERTa + MiniLM embedder). Opt-in:
+#   uv sync --group ml   (or set EZRA_RUN_NLI_TESTS=1 and install) — large (torch).
+# Unit tests run against in-memory fakes and do NOT require this group.
+ml = [
+    "sentence-transformers>=3.0",
 ]
 
 [tool.uv]

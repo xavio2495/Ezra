@@ -42,3 +42,7 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 *.egg-info/
+
+# secrets — GCP service-account keys/certs, minted tokens. NEVER commit.
+/secrets/
+*.jwk.json

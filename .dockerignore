@@ -1,0 +1,16 @@
+.git
+.venv
+**/__pycache__
+.pytest_cache
+.ruff_cache
+*.egg-info
+node_modules
+**/node_modules
+web/.svelte-kit
+web/build
+docs/jose
+secrets
+files.zip
+*.pem
+*.jwk.json
+.env*.local

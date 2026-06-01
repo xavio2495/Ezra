@@ -1,8 +1,12 @@
-# Local dev infrastructure for the hot tier (and warm tier, once it lands).
-# Mirrors the GKE deployment with the same container images. MongoDB is NOT here:
-# it runs on MongoDB Atlas in both dev and prod (set EZRA_MONGODB_URI in .env).
+# Local dev/test environment — fully containerized (no host installs).
+# Mirrors the GKE deployment with the same images. MongoDB is NOT here: it runs
+# on MongoDB Atlas in both dev and prod (EZRA_MONGODB_URI in .env).
 #
-#   docker compose up -d
+#   docker compose build app
+#   docker compose run --rm app                      # runs the test suite
+#   docker compose run --rm app uv run pytest -q     # explicit
+#   docker compose run --rm app bash                 # shell in the dev env
+#   docker compose up -d redis qdrant                # just the infra
 #
 services:
   redis:
@@ -10,3 +14,30 @@ services:
     ports:
       - "6379:6379"
     command: ["redis-server", "--save", "", "--appendonly", "no"]
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_storage:/qdrant/storage
+
+  app:
+    build: .
+    image: ezra/dev
+    env_file: .env
+    # Override the .env localhost URLs to reach the compose service network.
+    # (OS env beats the dotenv file in pydantic-settings.)
+    environment:
+      EZRA_REDIS_URL: redis://redis:6379
+      EZRA_QDRANT_URL: http://qdrant:6333
+    volumes:
+      - .:/app
+    working_dir: /app
+    depends_on:
+      - redis
+      - qdrant
+
+volumes:
+  qdrant_storage:
