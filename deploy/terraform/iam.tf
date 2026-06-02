@@ -22,6 +22,15 @@ resource "google_secret_manager_secret_iam_member" "secret_accessor" {
   member    = "serviceAccount:${var.runtime_gsa_email}"
 }
 
+# The ingest job (running as the runtime GSA via WI) queries the public BigQuery
+# F1 dataset. bigquery.jobUser lets it run query jobs billed to this project;
+# the public dataset itself is world-readable.
+resource "google_project_iam_member" "runtime_bigquery_job_user" {
+  project = var.project_id
+  role    = "roles/bigquery.jobUser"
+  member  = "serviceAccount:${var.runtime_gsa_email}"
+}
+
 # The GKE node service account must be able to PULL the API image from Artifact
 # Registry. cloud-platform oauth scope alone is NOT sufficient — the SA needs the
 # reader IAM role, or pods ImagePullBackOff with 403.

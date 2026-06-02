@@ -1,0 +1,54 @@
+# One-off F1 data-ingestion Job (NOT in kustomization — apply on demand):
+#   kubectl apply -f deploy/k8s/ingest-job.yaml
+#   kubectl -n ezra logs -f job/ezra-ingest
+#   kubectl -n ezra delete job ezra-ingest   # before re-running
+#
+# Fetches Jolpica + OpenF1 (REST) + BigQuery public F1 dataset + FastF1 timing,
+# and upserts into Atlas. BigQuery auths keyless via Workload Identity (the
+# ezra-api KSA -> ezra-ai-developer GSA, which has bigquery.jobUser); the Atlas
+# URI comes from the Secret Manager CSI mount (read by the secret-file loader).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ezra-ingest
+  namespace: ezra
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      serviceAccountName: ezra-api
+      restartPolicy: Never
+      containers:
+        - name: ezra-ingest
+          image: us-east1-docker.pkg.dev/ezra-498021/ezra/ezra-ingest:latest
+          envFrom:
+            - configMapRef:
+                name: ezra-config
+          env:
+            - name: EZRA_GCP_PROJECT_ID
+              value: "ezra-498021"
+            - name: EZRA_FASTF1_CACHE_DIR
+              value: "/tmp/fastf1_cache"
+          volumeMounts:
+            - name: secrets-store
+              mountPath: /mnt/secrets-store
+              readOnly: true
+            - name: cache
+              mountPath: /tmp/fastf1_cache
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1536Mi
+      volumes:
+        - name: secrets-store
+          csi:
+            driver: secrets-store-gke.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: ezra-secrets
+        - name: cache
+          emptyDir: {}

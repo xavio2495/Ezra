@@ -1,0 +1,23 @@
+# Demo data-ingestion image — carries the heavy `ingest` deps (FastF1 +
+# google-cloud-bigquery) that the lean API image deliberately omits. Runs as a
+# GKE Job; BigQuery auths keyless via Workload Identity, Atlas URI comes from the
+# Secret Manager CSI mount. Build from the repo root:
+#   docker build -f deploy/docker/Dockerfile.ingest -t <registry>/ezra-ingest:<tag> .
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+
+ENV UV_LINK_MODE=copy \
+    UV_PROJECT_ENVIRONMENT=/opt/venv \
+    UV_COMPILE_BYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH="/opt/venv/bin:$PATH"
+
+WORKDIR /app
+
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --group ingest
+
+# The ingest job imports ezra_core (config/secret loader) and the demo package.
+COPY ezra_core ./ezra_core
+COPY demo ./demo
+
+CMD ["python", "-m", "demo.f1_race_weekend.data_ingestion"]

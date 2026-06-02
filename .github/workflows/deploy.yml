@@ -22,6 +22,7 @@ env:
   ZONE: us-east1-c
   CLUSTER: ezra
   IMAGE: us-east1-docker.pkg.dev/ezra-498021/ezra/ezra-api
+  INGEST_IMAGE: us-east1-docker.pkg.dev/ezra-498021/ezra/ezra-ingest
 
 jobs:
   deploy:
@@ -40,12 +41,19 @@ jobs:
       - name: Configure Docker for Artifact Registry
         run: gcloud auth configure-docker ${REGION}-docker.pkg.dev --quiet
 
-      - name: Build & push image (tagged with release SHA)
+      - name: Build & push API image (tagged with release SHA)
         run: |
           docker build -f deploy/docker/Dockerfile \
             -t ${IMAGE}:${GITHUB_SHA} -t ${IMAGE}:latest .
           docker push ${IMAGE}:${GITHUB_SHA}
           docker push ${IMAGE}:latest
+
+      - name: Build & push ingest image (FastF1 + BigQuery)
+        run: |
+          docker build -f deploy/docker/Dockerfile.ingest \
+            -t ${INGEST_IMAGE}:${GITHUB_SHA} -t ${INGEST_IMAGE}:latest .
+          docker push ${INGEST_IMAGE}:${GITHUB_SHA}
+          docker push ${INGEST_IMAGE}:latest
 
       - uses: google-github-actions/get-gke-credentials@v2
         with:

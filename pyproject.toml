@@ -31,6 +31,12 @@ dev = [
 ml = [
     "sentence-transformers>=3.0",
 ]
+# Heavy demo data-ingestion sources (FastF1 timing + BigQuery public F1 dataset).
+# Opt-in: only the GKE ingest image installs these. Unit tests inject fakes.
+ingest = [
+    "fastf1>=3.3",
+    "google-cloud-bigquery>=3.20",
+]
 
 [tool.uv]
 package = false

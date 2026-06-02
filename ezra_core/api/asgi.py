@@ -21,27 +21,13 @@ whole step is a no-op when the mount is absent (local/dev).
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
-
 from ezra_core.api.app import create_app
 from ezra_core.config import EzraSettings
-
-SECRETS_DIR = os.environ.get("EZRA_SECRETS_DIR", "/mnt/secrets-store")
-
-
-def _load_secret_files(directory: str = SECRETS_DIR) -> None:
-    path = Path(directory)
-    if not path.is_dir():
-        return
-    for entry in path.iterdir():
-        if entry.is_file():
-            env_name = entry.name.upper().replace("-", "_")
-            os.environ.setdefault(env_name, entry.read_text().strip())
+from ezra_core.secret_files import load_secret_files
 
 
 def build_app():
-    _load_secret_files()
+    load_secret_files()
     settings = EzraSettings()
     token = settings.api_bearer_token or None
 
