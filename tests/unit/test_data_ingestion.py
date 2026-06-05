@@ -104,12 +104,13 @@ async def test_build_live_dataset_assembles_all_collections():
 
 
 def test_fetch_bigquery_f1_maps_rows():
-    rows = [{"year": 2023, "round": 7, "circuit": "Circuit de Monaco",
-             "driver": "VER", "position": 1, "points": 25}]
+    rows = [{"season": 2023, "round": 7, "circuit": "Circuit de Monaco",
+             "driver": "VER", "constructor": "Red Bull", "position": "1", "points": 25}]
     client = _FakeBQClient(rows)
     out = fetch_bigquery_f1(client)
     assert out[0]["driver"] == "VER"
-    assert out[0]["year"] == 2023
+    assert out[0]["season"] == 2023
+    assert out[0]["constructor"] == "Red Bull"
     assert out[0]["topics"] == ["strategy"]
 
 
@@ -126,8 +127,8 @@ async def test_build_live_dataset_includes_heavy_sources_when_enabled():
         data = await build_live_dataset(
             season=2024, year=2024, client=c,
             include_bigquery=True, bq_client=_FakeBQClient(
-                [{"year": 2023, "round": 7, "circuit": "Monaco", "driver": "VER",
-                  "position": 1, "points": 25}]),
+                [{"season": 2023, "round": 7, "circuit": "Monaco", "driver": "VER",
+                  "constructor": "Red Bull", "position": "1", "points": 25}]),
             include_fastf1=True, fastf1_loader=_fastf1_loader,
         )
     assert data["historical_results"][0]["driver"] == "VER"

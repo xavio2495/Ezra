@@ -155,49 +155,36 @@ async def fetch_openf1_weather(
 # lazy/injected so the lean API image and the unit tests never need them; on GKE
 # the ingest image carries them and BigQuery auths keyless via Workload Identity.
 # --------------------------------------------------------------------------- #
-_BQ_F1_QUERY = """
-SELECT r.year, r.round, c.name AS circuit, d.code AS driver,
-       res.positionOrder AS position, res.points
-FROM `bigquery-public-data.formula_1.results` res
-JOIN `bigquery-public-data.formula_1.races` r ON res.raceId = r.raceId
-JOIN `bigquery-public-data.formula_1.circuits` c ON r.circuitId = c.circuitId
-JOIN `bigquery-public-data.formula_1.drivers` d ON res.driverId = d.driverId
-WHERE LOWER(c.name) LIKE @circuit
-ORDER BY r.year DESC, res.positionOrder
-LIMIT @row_limit
-"""
+# There is no `bigquery-public-data.formula_1` dataset (verified) — we load
+# historical Monaco results from Ergast into our own table and query that, which
+# also makes the BigQuery mesh connector (time-travel) demoable on data we own.
+_BQ_F1_TABLE = os.environ.get("EZRA_BQ_F1_TABLE", "ezra-498021.formula_1.monaco_results")
 
 
 def fetch_bigquery_f1(
-    bq_client=None, *, project: str = "", circuit: str = "monaco", row_limit: int = 100
+    bq_client=None, *, project: str = "", table: Optional[str] = None, row_limit: int = 100
 ) -> list[dict]:
-    """Query the public BigQuery F1 dataset for a circuit's historical results.
+    """Query our BigQuery F1 results table for historical (multi-season) results.
 
     Pass ``bq_client`` in tests; in the GKE job it's created from ADC (Workload
-    Identity) with the billing project.
+    Identity). The table name is a trusted env/config value (not user input), so
+    it's inlined — BigQuery can't bind a table name as a query parameter.
     """
+    table = table or _BQ_F1_TABLE
+    query = (
+        f"SELECT season, round, circuit, driver, constructor, position, points "
+        f"FROM `{table}` ORDER BY season DESC LIMIT {int(row_limit)}"
+    )
     if bq_client is None:
         from google.cloud import bigquery  # lazy — only on the ingest image
 
         bq_client = bigquery.Client(project=project or None)
 
-    # Parameterised when the SDK is present (GKE); tests inject a client and the
-    # SDK is absent, so fall back to the bare query.
-    try:
-        from google.cloud import bigquery
-
-        job_config = bigquery.QueryJobConfig(
-            query_parameters=[
-                bigquery.ScalarQueryParameter("circuit", "STRING", f"%{circuit.lower()}%"),
-                bigquery.ScalarQueryParameter("row_limit", "INT64", row_limit),
-            ]
-        )
-        rows = bq_client.query(_BQ_F1_QUERY, job_config=job_config).result()
-    except ImportError:
-        rows = bq_client.query(_BQ_F1_QUERY).result()
+    rows = bq_client.query(query).result()
     return [{
-        "year": row["year"], "round": row["round"], "circuit": row["circuit"],
-        "driver": row["driver"], "position": row["position"], "points": row["points"],
+        "season": row["season"], "round": row["round"], "circuit": row["circuit"],
+        "driver": row["driver"], "constructor": row["constructor"],
+        "position": row["position"], "points": row["points"],
         "topics": ["strategy"],
     } for row in rows]
 
@@ -245,21 +232,41 @@ async def build_live_dataset(
     """
     own = client is None
     client = client or httpx.AsyncClient(timeout=30.0)
+
+    async def _try_async(label, coro):
+        try:
+            return await coro
+        except Exception as exc:  # one flaky source must not abort the whole ingest
+            print(f"WARN {label} failed: {exc}")
+            return []
+
+    def _try_sync(label, fn):
+        try:
+            return fn()
+        except Exception as exc:
+            print(f"WARN {label} failed: {exc}")
+            return []
+
     try:
         data = all_collections()
-        data["race_results"] = await fetch_jolpica_results(client, season=season)
-        data["race_calendar"] = await fetch_jolpica_schedule(client, season=season)
-        data["qualifying"] = await fetch_jolpica_qualifying(client, season=season)
-        sessions = await fetch_openf1_sessions(client, year=year)
+        data["race_results"] = await _try_async("jolpica.results", fetch_jolpica_results(client, season=season))
+        data["race_calendar"] = await _try_async("jolpica.schedule", fetch_jolpica_schedule(client, season=season))
+        data["qualifying"] = await _try_async("jolpica.qualifying", fetch_jolpica_qualifying(client, season=season))
+        sessions = await _try_async("openf1.sessions", fetch_openf1_sessions(client, year=year))
         data["sessions"] = sessions
         race = next((s for s in sessions if s.get("session_name") == "Race"), None)
         data["weather"] = (
-            await fetch_openf1_weather(client, session_key=race["session_key"]) if race else []
+            await _try_async("openf1.weather", fetch_openf1_weather(client, session_key=race["session_key"]))
+            if race else []
         )
         if include_bigquery:
-            data["historical_results"] = fetch_bigquery_f1(bq_client, project=bq_project)
+            data["historical_results"] = _try_sync(
+                "bigquery", lambda: fetch_bigquery_f1(bq_client, project=bq_project)
+            )
         if include_fastf1:
-            data["session_timing"] = fetch_fastf1_session(fastf1_loader, year=year)
+            data["session_timing"] = _try_sync(
+                "fastf1", lambda: fetch_fastf1_session(fastf1_loader, year=year)
+            )
         return data
     finally:
         if own:
