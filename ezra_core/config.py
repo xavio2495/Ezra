@@ -55,6 +55,9 @@ class EzraSettings(BaseSettings):
     nli_model: str = "cross-encoder/nli-deberta-v3-base"
     nli_device: str = "auto"
     embedding_similarity_threshold: float = 0.85
+    # Gemini embeddings cluster paraphrases lower than MiniLM, so the Gemini-backed
+    # checker (no-torch path) needs a lower first-pass cutoff than the local one.
+    gemini_checker_similarity_threshold: float = 0.65
     nli_confidence_threshold: float = 0.7
     default_merge_strategy: str = "last_write_wins"
     manual_resolution_timeout_seconds: int = 30

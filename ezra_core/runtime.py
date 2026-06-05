@@ -199,6 +199,13 @@ class Ezra:
             salience_decay_rate=self.settings.salience_decay_rate,
             tracer=self.tracer,
         )
+
+        def trust_for(other_agent_id: str, topic: str) -> float:
+            for reg in graph.active_agents:
+                if reg.agent_id == other_agent_id:
+                    return reg.trust_scores.get(topic, 1.0)
+            return 1.0
+
         return EzraService(
             session_graph_id=graph.session_graph_id,
             agent_id=agent_id,
@@ -210,6 +217,10 @@ class Ezra:
             mesh=mesh,
             branch_manager=self.branch_manager,
             policy=self.policy,
+            merge_strategy=graph.record.merge_strategy,
+            custom_resolver=graph.custom_resolver,
+            manual_resolution_timeout_seconds=self.settings.manual_resolution_timeout_seconds,
+            trust_for=trust_for,
         )
 
     # -- lifecycle -------------------------------------------------------- #
@@ -235,5 +246,25 @@ def default_checker(settings: EzraSettings) -> ContradictionChecker:
         SentenceTransformerEmbedder(device=settings.nli_device),
         LocalNliClassifier(model=settings.nli_model, device=settings.nli_device),
         similarity_threshold=settings.embedding_similarity_threshold,
+        nli_confidence_threshold=settings.nli_confidence_threshold,
+    )
+
+
+def gemini_checker(settings: EzraSettings) -> ContradictionChecker:
+    """Two-pass checker that uses Gemini for both passes — no torch.
+
+    First pass = ``gemini-embedding-001`` cosine; second pass = a Gemini NLI call.
+    Same non-negotiable two-pass architecture as :func:`default_checker`, but runs
+    in the lean image (the local DeBERTa stays the GKE default). The embedding
+    similarity threshold is lowered: Gemini embeddings cluster paraphrases lower
+    than MiniLM, so 0.85 would miss same-topic candidate pairs.
+    """
+    from ezra_core.llm.adapter import GeminiEmbedder, GeminiNliClassifier
+
+    key = settings.llm_api_key or None
+    return ContradictionChecker(
+        GeminiEmbedder(settings.embedding_model, api_key=key),
+        GeminiNliClassifier(settings.meta_agent_model, api_key=key),
+        similarity_threshold=settings.gemini_checker_similarity_threshold,
         nli_confidence_threshold=settings.nli_confidence_threshold,
     )

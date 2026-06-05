@@ -72,7 +72,7 @@ class GeminiEmbedder:
     """
 
     def __init__(
-        self, model: str = "gemini/text-embedding-004", *, api_key: Optional[str] = None
+        self, model: str = "gemini/gemini-embedding-001", *, api_key: Optional[str] = None
     ) -> None:
         self._model = model
         self._api_key = api_key
@@ -82,6 +82,55 @@ class GeminiEmbedder:
 
         response = litellm.embedding(model=self._model, input=[text], api_key=self._api_key)
         return list(response["data"][0]["embedding"])
+
+
+class GeminiNliClassifier:
+    """NLI second-pass via a Gemini call instead of the local DeBERTa CrossEncoder.
+
+    Same ``NliClassifier`` protocol (``classify(premise=, hypothesis=) ->
+    NliResult``) — it just asks the model to label the entailment relationship and
+    return its confidence as JSON. Lets the two-pass checker run in the lean image
+    (no torch). The local ``LocalNliClassifier`` stays the default on GKE where the
+    ``ml`` deps are present; this is the API-backed alternative.
+    """
+
+    def __init__(self, model: str = "gemini/gemini-3.1-flash-lite", *, api_key: Optional[str] = None):
+        self._model = model
+        self._api_key = api_key
+
+    def classify(self, *, premise: str, hypothesis: str):
+        import json
+
+        import litellm
+
+        from ezra_core.belief.checker import NliResult
+
+        prompt = (
+            "You are a natural-language-inference classifier. Given a premise and a "
+            "hypothesis, decide whether the hypothesis is an entailment, neutral, or "
+            "contradiction with respect to the premise. Respond ONLY with compact JSON: "
+            '{"label": "entailment|neutral|contradiction", "confidence": 0.0-1.0}.\n\n'
+            f"Premise: {premise}\nHypothesis: {hypothesis}"
+        )
+        response = litellm.completion(
+            model=self._model,
+            messages=[{"role": "user", "content": prompt}],
+            api_key=self._api_key,
+            temperature=0.0,
+        )
+        text = response.choices[0].message.content.strip()
+        if text.startswith("```"):
+            text = text.strip("`").split("\n", 1)[-1].rsplit("```", 1)[0]
+        try:
+            parsed = json.loads(text)
+            label = str(parsed["label"]).lower()
+            confidence = float(parsed["confidence"])
+        except (json.JSONDecodeError, KeyError, ValueError):
+            # Unparseable → treat as non-contradiction (the safe, no-reconcile path).
+            return NliResult(label="neutral", confidence=0.0)
+        if label not in ("entailment", "neutral", "contradiction"):
+            label = "neutral"
+        return NliResult(label=label, confidence=confidence)
 
 
 def llm_from_settings(settings: EzraSettings) -> LLMAdapter:

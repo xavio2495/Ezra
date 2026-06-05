@@ -13,21 +13,33 @@ arrives with the runtime/SDK work.
 
 from __future__ import annotations
 
-from typing import Any, Optional, Sequence
+from typing import Any, Callable, Optional, Sequence
+
+from pydantic import BaseModel, Field
 
 from ezra_core.belief.branching import BranchManager
 from ezra_core.belief.checker import ContradictionChecker
+from ezra_core.belief.reconciler import CustomResolver, ResolveContext, reconcile
 from ezra_core.belief.replay import reconstruct_state_at_turn, snapshot_now
 from ezra_core.belief.store import BeliefStore
 from ezra_core.mesh.base import BaseConnector
 from ezra_core.policy.engine import PolicyEngine
 from ezra_core.router import Router, TurnResult, write_back
-from ezra_core.schemas.belief import BeliefSnapshot, Commitment, Contradiction
+from ezra_core.schemas.belief import BeliefSnapshot, Commitment, Contradiction, Resolution
 from ezra_core.schemas.branch import Branch
 from ezra_core.schemas.mesh import MeshResult
 from ezra_core.schemas.memory import WarmSummary
-from ezra_core.schemas.session_graph import AgentRegistration
+from ezra_core.schemas.session_graph import AgentRegistration, MergeStrategy
 from ezra_core.tiers.warm import WarmTier
+
+
+class CommitResult(BaseModel):
+    """Outcome of :meth:`EzraService.commit` — the new commitment plus, when a
+    contradiction was detected, the contradiction and how it was resolved."""
+
+    commitment: Commitment
+    contradiction: Optional[Contradiction] = None
+    resolution: Optional[Resolution] = None
 
 
 class EzraService:
@@ -44,6 +56,10 @@ class EzraService:
         mesh: Optional[BaseConnector] = None,
         branch_manager: Optional[BranchManager] = None,
         policy: Optional[PolicyEngine] = None,
+        merge_strategy: MergeStrategy = "last_write_wins",
+        custom_resolver: Optional[CustomResolver] = None,
+        manual_resolution_timeout_seconds: int = 30,
+        trust_for: Optional[Callable[[str, str], float]] = None,
     ) -> None:
         self.session_graph_id = session_graph_id
         self.agent_id = agent_id
@@ -55,6 +71,11 @@ class EzraService:
         self._mesh = mesh
         self._branches = branch_manager
         self._policy = policy or PolicyEngine(enabled=False)
+        self._merge_strategy = merge_strategy
+        self._custom_resolver = custom_resolver
+        self._manual_timeout = manual_resolution_timeout_seconds
+        # (agent_id, topic) -> trust score; defaults to 1.0 when unknown.
+        self._trust_for = trust_for or (lambda agent_id, topic: 1.0)
 
     @property
     def _scope(self) -> set[str]:
@@ -119,12 +140,85 @@ class EzraService:
             trust_score=trust_score,
         )
 
+    async def commit(
+        self,
+        claim: str,
+        topic: str,
+        *,
+        turn_index: int,
+        type: str = "decision",
+        value: Any = None,
+        trust_score: float = 1.0,
+    ) -> "CommitResult":
+        """Commit a belief WITH contradiction handling — the full step-3+8 flow.
+
+        Detects a contradiction against active commitments on ``topic`` (two-pass
+        checker), reconciles it with the graph's merge strategy, writes the new
+        commitment, and supersedes the loser when the new claim wins. This is the
+        surface an agent uses to "say something" through Ezra; the ADK
+        ``commit_belief`` tool is a thin wrapper over it.
+        """
+        self._policy.check_topic(self.permission_scope, topic)
+
+        contradiction: Optional[Contradiction] = None
+        resolution: Optional[Resolution] = None
+        if self._checker is not None:
+            active = await self._belief.get_active(self.session_graph_id, topic=topic)
+            contradiction = self._checker.check(
+                new_claim=claim,
+                new_topic=topic,
+                new_agent_id=self.agent_id,
+                commitments=active,
+            )
+            if contradiction is not None:
+                existing_trust = self._trust_for(contradiction.existing_agent_id, topic)
+                resolution = await reconcile(
+                    contradiction,
+                    merge_strategy=self._merge_strategy,
+                    existing_trust=existing_trust,
+                    new_trust=trust_score,
+                    manual_resolution_timeout_seconds=self._manual_timeout,
+                    custom_resolver=self._custom_resolver,
+                    resolve_context=ResolveContext(
+                        topic=topic,
+                        existing_agent_id=contradiction.existing_agent_id,
+                        new_agent_id=self.agent_id,
+                        existing_trust=existing_trust,
+                        new_trust=trust_score,
+                        active_commitments=active,
+                    ),
+                )
+
+        commitment = await write_back(
+            belief_store=self._belief,
+            session_graph_id=self.session_graph_id,
+            agent_id=self.agent_id,
+            turn_index=turn_index,
+            claim=claim,
+            topic=topic,
+            type=type,  # type: ignore[arg-type]
+            value=value,
+            trust_score=trust_score,
+        )
+        if (
+            contradiction is not None
+            and resolution is not None
+            and resolution.decision == "accept_new"
+        ):
+            await self._belief.supersede(contradiction.existing_commitment_id, commitment.id)
+
+        return CommitResult(
+            commitment=commitment, contradiction=contradiction, resolution=resolution
+        )
+
     async def query(
         self, query: str, *, topics: Sequence[str] = (), as_of=None
     ) -> MeshResult:
+        # Policy gates first: an out-of-scope topic is denied regardless of whether
+        # a connector exists (the agent must never even learn it could fetch it).
+        self._policy.check_topics(self.permission_scope, topics)
         if self._mesh is None:
             raise RuntimeError("no mesh connector configured for this agent")
-        self._policy.check_topics(self.permission_scope, topics)
         return await self._mesh.fetch(query, self.agent_id, self.permission_scope, as_of)
 
     async def complete(self, user_input: str, *, system_prompt: str = "", **kwargs) -> TurnResult:

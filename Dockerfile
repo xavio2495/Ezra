@@ -12,8 +12,9 @@ WORKDIR /app
 
 # Dependency layer — only the lockfiles, so it caches across source edits.
 # (pyproject sets `package = false`, so no project build is needed.)
+# `--group agents` adds google-adk so the real multi-agent demo runs in-container.
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen
+RUN uv sync --frozen --group agents
 
 # Source is bind-mounted in dev (compose); copied here for standalone runs.
 COPY . .

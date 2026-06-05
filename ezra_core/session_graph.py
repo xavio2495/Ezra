@@ -123,6 +123,11 @@ class SessionGraph:
         return self._record.state
 
     @property
+    def custom_resolver(self):
+        """The in-process custom resolver (None unless merge_strategy='custom')."""
+        return self._custom_resolver
+
+    @property
     def active_agents(self) -> list[AgentRegistration]:
         return list(self._record.active_agents)
 
