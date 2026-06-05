@@ -3,9 +3,13 @@ import httpx
 from demo.f1_race_weekend.data_ingestion import (
     build_dataset,
     build_live_dataset,
+    build_wide_dataset,
     fetch_bigquery_f1,
+    fetch_constructor_standings,
+    fetch_driver_standings,
     fetch_fastf1_session,
     fetch_jolpica_results,
+    fetch_season_results,
 )
 
 
@@ -133,3 +137,75 @@ async def test_build_live_dataset_includes_heavy_sources_when_enabled():
         )
     assert data["historical_results"][0]["driver"] == "VER"
     assert data["session_timing"][0]["driver"] == "LEC"
+
+
+# -- wide historical spine ------------------------------------------------- #
+def _season_results_page(total: int, races: list[dict]) -> dict:
+    return {"MRData": {"total": str(total), "RaceTable": {"Races": races}}}
+
+
+_RACE_A = {"round": "1", "raceName": "Bahrain GP", "Circuit": {"circuitName": "Bahrain"},
+           "date": "2023-03-05", "Results": [
+               {"position": "1", "points": "25", "grid": "1", "status": "Finished",
+                "Driver": {"code": "VER"}, "Constructor": {"name": "Red Bull"}}]}
+_RACE_B = {"round": "2", "raceName": "Saudi GP", "Circuit": {"circuitName": "Jeddah"},
+           "date": "2023-03-19", "Results": [
+               {"position": "1", "points": "25", "grid": "2", "status": "Finished",
+                "Driver": {"code": "PER"}, "Constructor": {"name": "Red Bull"}}]}
+_DRIVER_STANDINGS = {"MRData": {"StandingsTable": {"StandingsLists": [
+    {"DriverStandings": [{"position": "1", "points": "575", "wins": "19",
+                          "Driver": {"code": "VER"},
+                          "Constructors": [{"name": "Red Bull"}]}]}]}}}
+_CONSTRUCTOR_STANDINGS = {"MRData": {"StandingsTable": {"StandingsLists": [
+    {"ConstructorStandings": [{"position": "1", "points": "860", "wins": "21",
+                               "Constructor": {"name": "Red Bull"}}]}]}}}
+_CIRCUITS = {"MRData": {"total": "2", "CircuitTable": {"Circuits": [
+    {"circuitId": "monaco", "circuitName": "Circuit de Monaco",
+     "Location": {"locality": "Monte-Carlo", "country": "Monaco", "lat": "43.7", "long": "7.4"}},
+    {"circuitId": "silverstone", "circuitName": "Silverstone",
+     "Location": {"locality": "Silverstone", "country": "UK", "lat": "52.0", "long": "-1.0"}}]}}}
+
+
+def _wide_handler(request: httpx.Request) -> httpx.Response:
+    url = str(request.url)
+    if "/results.json" in url:
+        return httpx.Response(200, json=_season_results_page(2, [_RACE_A, _RACE_B]))
+    if "/driverStandings.json" in url:
+        return httpx.Response(200, json=_DRIVER_STANDINGS)
+    if "/constructorStandings.json" in url:
+        return httpx.Response(200, json=_CONSTRUCTOR_STANDINGS)
+    if "/circuits.json" in url:
+        return httpx.Response(200, json=_CIRCUITS)
+    return httpx.Response(404, json={})
+
+
+def _wide_client() -> httpx.AsyncClient:
+    return httpx.AsyncClient(transport=httpx.MockTransport(_wide_handler))
+
+
+async def test_fetch_season_results_flattens_all_rounds():
+    async with _wide_client() as c:
+        rows = await fetch_season_results(c, season=2023, polite_delay=0.0)
+    assert {r["driver"] for r in rows} == {"VER", "PER"}
+    assert all(r["season"] == 2023 for r in rows)
+    assert {r["round"] for r in rows} == {1, 2}
+
+
+async def test_fetch_standings_parse():
+    async with _wide_client() as c:
+        ds = await fetch_driver_standings(c, season=2023)
+        cs = await fetch_constructor_standings(c, season=2023)
+    assert ds[0]["driver"] == "VER" and ds[0]["wins"] == "19"
+    assert cs[0]["constructor"] == "Red Bull" and cs[0]["points"] == "860"
+
+
+async def test_build_wide_dataset_spans_seasons():
+    async with _wide_client() as c:
+        data = await build_wide_dataset(
+            seasons=range(2022, 2024), client=c, polite_delay=0.0
+        )
+    # Two seasons × two rounds = four result rows.
+    assert len(data["race_results"]) == 4
+    assert len(data["driver_standings"]) == 2  # one per season
+    assert {ci["circuit_id"] for ci in data["circuits"]} == {"monaco", "silverstone"}
+    assert data["parts_inventory"]  # synthesised systems merged in

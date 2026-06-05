@@ -19,8 +19,9 @@ dataset, Snowflake history) need extra deps/credentials and are wired separately
 
 from __future__ import annotations
 
+import asyncio
 import os
-from typing import Optional
+from typing import AsyncIterator, Optional
 
 import httpx
 
@@ -214,6 +215,215 @@ def fetch_fastf1_session(
     } for r in records]
 
 
+# --------------------------------------------------------------------------- #
+# Wide historical spine — the full Ergast/Jolpica back-catalogue, paginated.
+# Jolpica is a free community API with rate limits, so every page is polite
+# (small delay) and retries on 429. ``build_wide_dataset`` loops seasons to build
+# a genuinely large, multi-collection federated corpus (results + standings +
+# reference circuits) on top of the synthesised team systems.
+# --------------------------------------------------------------------------- #
+async def _get_json_retrying(
+    client: httpx.AsyncClient, url: str, params: dict, *, max_retries: int = 4
+):
+    """GET JSON, backing off on 429/5xx (Jolpica rate-limits unauthenticated)."""
+    delay = 1.0
+    for attempt in range(max_retries + 1):
+        resp = await client.get(url, params=params)
+        if resp.status_code == 429 or resp.status_code >= 500:
+            if attempt < max_retries:
+                await asyncio.sleep(delay)
+                delay *= 2
+                continue
+        resp.raise_for_status()
+        return resp.json()
+    resp.raise_for_status()
+    return resp.json()
+
+
+async def _ergast_pages(
+    client: httpx.AsyncClient,
+    path: str,
+    *,
+    limit: int = 100,
+    polite_delay: float = 0.3,
+    max_rows: Optional[int] = None,
+) -> AsyncIterator[dict]:
+    """Yield each page's ``MRData`` for an Ergast path, following limit/offset."""
+    offset = 0
+    while True:
+        payload = await _get_json_retrying(
+            client, f"{JOLPICA_URL}/{path}", {"limit": limit, "offset": offset}
+        )
+        mrdata = payload.get("MRData", {})
+        yield mrdata
+        total = int(mrdata.get("total", 0))
+        offset += limit
+        if offset >= total or (max_rows is not None and offset >= max_rows):
+            break
+        if polite_delay:
+            await asyncio.sleep(polite_delay)
+
+
+async def fetch_season_results(
+    client: httpx.AsyncClient, *, season: int, polite_delay: float = 0.3
+) -> list[dict]:
+    """All race results for one season (every round), flattened to one row/result.
+
+    Pagination may split a race across pages; flattening per result row makes that
+    transparent — each result appears exactly once.
+    """
+    out: list[dict] = []
+    async for mrdata in _ergast_pages(
+        client, f"{season}/results.json", polite_delay=polite_delay
+    ):
+        for race in mrdata.get("RaceTable", {}).get("Races", []):
+            for r in race.get("Results", []):
+                driver = r.get("Driver", {})
+                out.append({
+                    "season": int(season),
+                    "round": int(race.get("round", 0)),
+                    "race_name": race.get("raceName"),
+                    "circuit": race.get("Circuit", {}).get("circuitName"),
+                    "date": race.get("date"),
+                    "position": r.get("position"),
+                    "driver": driver.get("code") or driver.get("familyName"),
+                    "constructor": r.get("Constructor", {}).get("name"),
+                    "grid": r.get("grid"),
+                    "status": r.get("status"),
+                    "points": r.get("points"),
+                    "topics": ["strategy"],
+                })
+    return out
+
+
+async def fetch_driver_standings(client: httpx.AsyncClient, *, season: int) -> list[dict]:
+    payload = await _get_json_retrying(
+        client, f"{JOLPICA_URL}/{season}/driverStandings.json", {}
+    )
+    lists = payload.get("MRData", {}).get("StandingsTable", {}).get("StandingsLists", [])
+    if not lists:
+        return []
+    out = []
+    for s in lists[0].get("DriverStandings", []):
+        driver = s.get("Driver", {})
+        cons = s.get("Constructors", [{}])
+        out.append({
+            "season": int(season),
+            "position": s.get("position"),
+            "points": s.get("points"),
+            "wins": s.get("wins"),
+            "driver": driver.get("code") or driver.get("familyName"),
+            "constructor": cons[0].get("name") if cons else None,
+            "topics": ["strategy"],
+        })
+    return out
+
+
+async def fetch_constructor_standings(
+    client: httpx.AsyncClient, *, season: int
+) -> list[dict]:
+    payload = await _get_json_retrying(
+        client, f"{JOLPICA_URL}/{season}/constructorStandings.json", {}
+    )
+    lists = payload.get("MRData", {}).get("StandingsTable", {}).get("StandingsLists", [])
+    if not lists:
+        return []
+    return [{
+        "season": int(season),
+        "position": s.get("position"),
+        "points": s.get("points"),
+        "wins": s.get("wins"),
+        "constructor": s.get("Constructor", {}).get("name"),
+        "topics": ["strategy"],
+    } for s in lists[0].get("ConstructorStandings", [])]
+
+
+async def fetch_circuits(
+    client: httpx.AsyncClient, *, polite_delay: float = 0.3
+) -> list[dict]:
+    """All circuits Ergast knows about (reference data, paginated)."""
+    out: list[dict] = []
+    async for mrdata in _ergast_pages(client, "circuits.json", polite_delay=polite_delay):
+        for c in mrdata.get("CircuitTable", {}).get("Circuits", []):
+            loc = c.get("Location", {})
+            out.append({
+                "circuit_id": c.get("circuitId"),
+                "circuit": c.get("circuitName"),
+                "locality": loc.get("locality"),
+                "country": loc.get("country"),
+                "lat": loc.get("lat"),
+                "long": loc.get("long"),
+                "topics": ["calendar"],
+            })
+    return out
+
+
+async def build_wide_dataset(
+    *,
+    seasons: range,
+    client: Optional[httpx.AsyncClient] = None,
+    polite_delay: float = 0.3,
+    include_bigquery: bool = False,
+    include_fastf1: bool = False,
+    bq_client=None,
+    bq_project: str = "",
+    fastf1_loader=None,
+    fastf1_year: int = 2024,
+) -> dict[str, list[dict]]:
+    """Build the full historical corpus across ``seasons`` + the team systems.
+
+    Loops every season for results + both standings, adds the all-time circuit
+    reference, and merges the synthesised team systems. Heavy sources (BigQuery,
+    FastF1) are opt-in. One flaky season must not abort the whole grind.
+    """
+    own = client is None
+    client = client or httpx.AsyncClient(timeout=60.0)
+
+    async def _try(label, coro):
+        try:
+            return await coro
+        except Exception as exc:
+            print(f"WARN {label} failed: {exc}")
+            return []
+
+    try:
+        data = all_collections()
+        results: list[dict] = []
+        d_standings: list[dict] = []
+        c_standings: list[dict] = []
+        for season in seasons:
+            results += await _try(
+                f"results.{season}",
+                fetch_season_results(client, season=season, polite_delay=polite_delay),
+            )
+            d_standings += await _try(
+                f"driverStandings.{season}", fetch_driver_standings(client, season=season)
+            )
+            c_standings += await _try(
+                f"constructorStandings.{season}",
+                fetch_constructor_standings(client, season=season),
+            )
+        data["race_results"] = results
+        data["driver_standings"] = d_standings
+        data["constructor_standings"] = c_standings
+        data["circuits"] = await _try("circuits", fetch_circuits(client, polite_delay=polite_delay))
+
+        if include_bigquery:
+            try:
+                data["historical_results"] = fetch_bigquery_f1(bq_client, project=bq_project)
+            except Exception as exc:
+                print(f"WARN bigquery failed: {exc}")
+        if include_fastf1:
+            try:
+                data["session_timing"] = fetch_fastf1_session(fastf1_loader, year=fastf1_year)
+            except Exception as exc:
+                print(f"WARN fastf1 failed: {exc}")
+        return data
+    finally:
+        if own:
+            await client.aclose()
+
+
 async def build_live_dataset(
     *,
     season: int = 2024,
@@ -273,15 +483,23 @@ async def build_live_dataset(
             await client.aclose()
 
 
-async def ingest_to_mongo(client, db_name: str, *, dataset: Optional[dict] = None) -> dict[str, int]:
-    """Upsert a corpus into MongoDB. Returns per-collection row counts."""
+async def ingest_to_mongo(
+    client, db_name: str, *, dataset: Optional[dict] = None, batch_size: int = 1000
+) -> dict[str, int]:
+    """Replace each collection with the corpus. Returns per-collection row counts.
+
+    Inserts are chunked (``batch_size``) so the wide historical corpus — tens of
+    thousands of result rows — doesn't exceed MongoDB's bulk-write limits.
+    """
     data = dataset if dataset is not None else build_dataset()
     counts: dict[str, int] = {}
     db = client[db_name]
     for name, rows in data.items():
         if rows:
             await db[name].delete_many({})
-            await db[name].insert_many([dict(r) for r in rows])
+            for start in range(0, len(rows), batch_size):
+                chunk = [dict(r) for r in rows[start : start + batch_size]]
+                await db[name].insert_many(chunk)
         counts[name] = len(rows)
     return counts
 
@@ -305,17 +523,38 @@ async def _main() -> None:  # pragma: no cover - script entry point
     include_fastf1 = os.environ.get("EZRA_INGEST_FASTF1", "true").lower() == "true"
     project = os.environ.get("EZRA_GCP_PROJECT_ID", "")
 
-    print(f"Fetching F1 data (Jolpica + OpenF1"
-          f"{' + BigQuery' if include_bigquery else ''}"
-          f"{' + FastF1' if include_fastf1 else ''})…")
-    dataset = await build_live_dataset(
-        include_bigquery=include_bigquery, include_fastf1=include_fastf1, bq_project=project
-    )
+    # Wide mode = the full historical spine across a season range (default 1950→last
+    # complete season). Set EZRA_INGEST_WIDE=false for the light single-weekend corpus.
+    wide = os.environ.get("EZRA_INGEST_WIDE", "true").lower() == "true"
+    season_start = int(os.environ.get("EZRA_INGEST_SEASON_START", "1950"))
+    season_end = int(os.environ.get("EZRA_INGEST_SEASON_END", "2025"))
+
+    if wide:
+        seasons = range(season_start, season_end + 1)
+        print(f"Fetching WIDE F1 corpus: seasons {season_start}–{season_end}"
+              f"{' + BigQuery' if include_bigquery else ''}"
+              f"{' + FastF1' if include_fastf1 else ''} (this takes a while)…")
+        dataset = await build_wide_dataset(
+            seasons=seasons,
+            include_bigquery=include_bigquery,
+            include_fastf1=include_fastf1,
+            bq_project=project,
+        )
+    else:
+        print(f"Fetching F1 data (Jolpica + OpenF1"
+              f"{' + BigQuery' if include_bigquery else ''}"
+              f"{' + FastF1' if include_fastf1 else ''})…")
+        dataset = await build_live_dataset(
+            include_bigquery=include_bigquery, include_fastf1=include_fastf1, bq_project=project
+        )
+
+    ensure_egress_allowed(settings)  # re-assert just before connecting (long fetch may have elapsed)
     client = AsyncMongoClient(settings.mongodb_uri)
     counts = await ingest_to_mongo(client, settings.mongodb_db, dataset=dataset)
+    total = sum(counts.values())
     for name, n in counts.items():
         print(f"  {name}: {n}")
-    print("Done.")
+    print(f"Done. {total} rows across {len(counts)} collections.")
 
 
 if __name__ == "__main__":  # pragma: no cover
