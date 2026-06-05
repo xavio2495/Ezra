@@ -11,3 +11,15 @@ data:
   EZRA_MONGODB_DB: "ezra"
   EZRA_API_PORT: "8080"
   EZRA_TRACING_ENABLED: "false"
+  # Atlas project id (non-secret resource id) for the egress-allow bootstrap.
+  EZRA_MONGODB_ATLAS_PROJECT_ID: "6a1d041c95f9c46782a7bf07"
+  # Snowflake connection (password comes from Secret Manager, not here).
+  EZRA_SNOWFLAKE_ACCOUNT: "LOENOUW-FF32941"
+  EZRA_SNOWFLAKE_USER: "XAVIO2495"
+  EZRA_SNOWFLAKE_ROLE: "ACCOUNTADMIN"
+  EZRA_SNOWFLAKE_WAREHOUSE: "COMPUTE_WH"
+  EZRA_SNOWFLAKE_DATABASE: "EZRA"
+  EZRA_SNOWFLAKE_SCHEMA: "PUBLIC"
+  # BigQuery target for the historical-results table (keyless via Workload Identity).
+  EZRA_BIGQUERY_PROJECT: "ezra-498021"
+  EZRA_BIGQUERY_DATASET: "formula_1"

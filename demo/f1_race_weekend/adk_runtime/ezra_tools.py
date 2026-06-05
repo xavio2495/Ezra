@@ -73,11 +73,21 @@ def build_tools(
             }
         except RuntimeError as exc:
             return {"status": "error", "reason": str(exc)}
+        rows = len(result.data) if isinstance(result.data, list) else (0 if result.data is None else 1)
+        if events is not None:
+            events.append({
+                "kind": "fetch",
+                "agent": service.agent_id,
+                "source": result.provenance.source,
+                "time_travel_available": result.provenance.time_travel_available,
+                "rows": rows,
+            })
         return {
             "status": "success",
             "source": result.provenance.source,
             "time_travel_available": result.provenance.time_travel_available,
-            "data": result.data,
+            "rows": rows,
+            "data": result.data[:5] if isinstance(result.data, list) else result.data,
         }
 
     async def commit_belief(claim: str, topic: str) -> dict:
@@ -98,6 +108,7 @@ def build_tools(
         result = {"status": "success", "committed": claim, "topic": topic}
         if outcome.contradiction is not None and outcome.resolution is not None:
             detail = {
+                "kind": "contradiction",
                 "topic": topic,
                 "new_agent": service.agent_id,
                 "new_claim": claim,

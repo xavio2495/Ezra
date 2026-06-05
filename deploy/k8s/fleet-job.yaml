@@ -1,0 +1,50 @@
+# One-off live ADK multi-agent fleet Job (NOT in kustomization — apply on demand):
+#   kubectl apply -f deploy/k8s/fleet-job.yaml
+#   kubectl -n ezra logs -f job/ezra-fleet
+#   kubectl -n ezra delete job ezra-fleet   # before re-running
+#
+# Runs the real google.adk fleet over Ezra against live Atlas + Redis + Qdrant +
+# Gemini, with race_strategy bound to the Snowflake connector and aero_rd to
+# BigQuery. Secrets (Atlas URI + API keys, Gemini key, Snowflake password) come
+# from the Secret Manager CSI mount; the rest of the connection config is in the
+# ConfigMap. BigQuery + the egress-allow bootstrap auth keyless via Workload Identity.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ezra-fleet
+  namespace: ezra
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 3600
+  activeDeadlineSeconds: 1200
+  template:
+    spec:
+      serviceAccountName: ezra-api
+      restartPolicy: Never
+      containers:
+        - name: ezra-fleet
+          image: us-east1-docker.pkg.dev/ezra-498021/ezra/ezra-agents:latest
+          envFrom:
+            - configMapRef:
+                name: ezra-config
+          env:
+            - name: EZRA_GCP_PROJECT_ID
+              value: "ezra-498021"
+          volumeMounts:
+            - name: secrets-store
+              mountPath: /mnt/secrets-store
+              readOnly: true
+          resources:
+            requests:
+              cpu: 250m
+              memory: 768Mi
+            limits:
+              cpu: "1"
+              memory: 2Gi
+      volumes:
+        - name: secrets-store
+          csi:
+            driver: secrets-store-gke.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: ezra-secrets

@@ -15,6 +15,7 @@ metadata:
 spec:
   backoffLimit: 1
   ttlSecondsAfterFinished: 3600
+  activeDeadlineSeconds: 5400   # the full 1950→2025 grind is rate-limited; allow 90 min
   template:
     spec:
       serviceAccountName: ezra-api
@@ -30,6 +31,20 @@ spec:
               value: "ezra-498021"
             - name: EZRA_FASTF1_CACHE_DIR
               value: "/tmp/fastf1_cache"
+            # Full historical spine → Mongo + Snowflake + BigQuery.
+            - name: EZRA_INGEST_WIDE
+              value: "true"
+            - name: EZRA_INGEST_SEASON_START
+              value: "1950"
+            - name: EZRA_INGEST_SEASON_END
+              value: "2025"
+            - name: EZRA_INGEST_SNOWFLAKE
+              value: "true"
+            - name: EZRA_INGEST_BIGQUERY
+              value: "true"
+            # FastF1 timing needs a heavier pull; off for the wide run by default.
+            - name: EZRA_INGEST_FASTF1
+              value: "false"
           volumeMounts:
             - name: secrets-store
               mountPath: /mnt/secrets-store
@@ -39,10 +54,10 @@ spec:
           resources:
             requests:
               cpu: 250m
-              memory: 512Mi
+              memory: 768Mi
             limits:
               cpu: "1"
-              memory: 1536Mi
+              memory: 2Gi
       volumes:
         - name: secrets-store
           csi:

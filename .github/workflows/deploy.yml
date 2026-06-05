@@ -23,6 +23,7 @@ env:
   CLUSTER: ezra
   IMAGE: us-east1-docker.pkg.dev/ezra-498021/ezra/ezra-api
   INGEST_IMAGE: us-east1-docker.pkg.dev/ezra-498021/ezra/ezra-ingest
+  AGENTS_IMAGE: us-east1-docker.pkg.dev/ezra-498021/ezra/ezra-agents
 
 jobs:
   deploy:
@@ -48,12 +49,19 @@ jobs:
           docker push ${IMAGE}:${GITHUB_SHA}
           docker push ${IMAGE}:latest
 
-      - name: Build & push ingest image (FastF1 + BigQuery)
+      - name: Build & push ingest image (FastF1 + BigQuery + Snowflake)
         run: |
           docker build -f deploy/docker/Dockerfile.ingest \
             -t ${INGEST_IMAGE}:${GITHUB_SHA} -t ${INGEST_IMAGE}:latest .
           docker push ${INGEST_IMAGE}:${GITHUB_SHA}
           docker push ${INGEST_IMAGE}:latest
+
+      - name: Build & push agents image (ADK fleet + federated connectors)
+        run: |
+          docker build -f deploy/docker/Dockerfile.agents \
+            -t ${AGENTS_IMAGE}:${GITHUB_SHA} -t ${AGENTS_IMAGE}:latest .
+          docker push ${AGENTS_IMAGE}:${GITHUB_SHA}
+          docker push ${AGENTS_IMAGE}:latest
 
       - uses: google-github-actions/get-gke-credentials@v2
         with:

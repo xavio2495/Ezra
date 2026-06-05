@@ -45,7 +45,14 @@ variable "k8s_service_account" {
 variable "secret_ids" {
   type        = list(string)
   description = "Secret Manager secret ids the workload reads (values pushed separately)."
-  default     = ["ezra-mongodb-uri", "ezra-llm-api-key", "ezra-api-bearer-token"]
+  default = [
+    "ezra-mongodb-uri",
+    "ezra-llm-api-key",
+    "ezra-api-bearer-token",
+    "ezra-mongodb-public-key",
+    "ezra-mongodb-private-key",
+    "ezra-snowflake-password",
+  ]
 }
 
 # --- GKE cluster (held off by default — set true when ready to provision) --- #

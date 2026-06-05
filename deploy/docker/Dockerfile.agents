@@ -1,0 +1,23 @@
+# Agent-fleet image — runs the real Google ADK multi-agent demo over Ezra against
+# the live federated stores. Carries the `agents` (google-adk) + `ingest`
+# (snowflake / bigquery / fastf1) deps. Deliberately NO `ml` group: the two-pass
+# contradiction checker uses the Gemini-backed NLI (gemini_checker), so no torch —
+# keeping the image small and the pull fast. Build from the repo root:
+#   docker build -f deploy/docker/Dockerfile.agents -t <registry>/ezra-agents:<tag> .
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+
+ENV UV_LINK_MODE=copy \
+    UV_PROJECT_ENVIRONMENT=/opt/venv \
+    UV_COMPILE_BYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH="/opt/venv/bin:$PATH"
+
+WORKDIR /app
+
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --group agents --group ingest
+
+COPY ezra_core ./ezra_core
+COPY demo ./demo
+
+CMD ["python", "-m", "demo.f1_race_weekend.adk_runtime.fleet"]
