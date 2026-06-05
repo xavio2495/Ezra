@@ -20,17 +20,30 @@ class EzraSettings(BaseSettings):
         extra="ignore",
     )
 
-    # LLM
-    llm_model: str = "gemini/gemini-2.0-flash"
+    # LLM. Gemini 2.0 Flash/Flash-Lite were shut down 2026-06-01; gemini-3.1-flash
+    # isn't exposed on the AI Studio key, so agents use 2.5-flash and meta-agents
+    # the 3.1 flash-lite (both verified live). Override via EZRA_LLM_MODEL etc.
+    llm_model: str = "gemini/gemini-2.5-flash"
     llm_api_key: str = ""
-    meta_agent_model: str = "gemini/gemini-2.0-flash-lite"
-    embedding_model: str = "gemini/text-embedding-004"
+    meta_agent_model: str = "gemini/gemini-3.1-flash-lite"
+    embedding_model: str = "gemini/gemini-embedding-001"
 
     # Storage
     mongodb_uri: str = ""
     mongodb_db: str = "ezra"
     redis_url: str = "redis://localhost:6379"
     qdrant_url: str = "http://localhost:6333"
+
+    # Mesh connectors (federated sources). Blank = connector not configured.
+    mongodb_mcp_url: str = "http://localhost:3001"
+    snowflake_account: str = ""
+    snowflake_user: str = ""
+    snowflake_private_key_path: str = ""
+    snowflake_warehouse: str = ""
+    snowflake_database: str = ""
+    snowflake_schema: str = ""
+    bigquery_project: str = ""
+    bigquery_dataset: str = ""
 
     # Memory behaviour
     context_limit: int = 128000
