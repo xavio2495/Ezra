@@ -12,9 +12,10 @@ WORKDIR /app
 
 # Dependency layer — only the lockfiles, so it caches across source edits.
 # (pyproject sets `package = false`, so no project build is needed.)
-# `--group agents` adds google-adk so the real multi-agent demo runs in-container.
+# `--group agents` adds google-adk (real multi-agent demo); `--group ingest` adds
+# the Snowflake + BigQuery + FastF1 SDKs so the federated connectors run in-container.
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --group agents
+RUN uv sync --frozen --group agents --group ingest
 
 # Source is bind-mounted in dev (compose); copied here for standalone runs.
 COPY . .

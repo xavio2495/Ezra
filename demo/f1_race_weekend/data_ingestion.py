@@ -504,6 +504,95 @@ async def ingest_to_mongo(
     return counts
 
 
+# --------------------------------------------------------------------------- #
+# Snowflake load — historical race results into the warehouse the Snowflake mesh
+# connector queries (the demo's "Snowflake: historical race results" source, with
+# native AT(TIMESTAMP=>) time-travel). Lazy SDK import; runs only where wanted.
+# --------------------------------------------------------------------------- #
+_SF_RESULT_COLS = [
+    ("SEASON", "INTEGER"), ("ROUND", "INTEGER"), ("RACE_NAME", "STRING"),
+    ("CIRCUIT", "STRING"), ("RACE_DATE", "STRING"), ("POSITION", "STRING"),
+    ("DRIVER", "STRING"), ("CONSTRUCTOR", "STRING"), ("GRID", "STRING"),
+    ("STATUS", "STRING"), ("POINTS", "STRING"),
+]
+
+
+def load_results_to_snowflake(settings, rows: list[dict], *, batch_size: int = 5000) -> int:
+    """Create EZRA.<schema>.RACE_RESULTS and load ``rows`` into it. Returns the
+    row count. Synchronous (snowflake-connector is sync); call via asyncio.to_thread
+    if needed. Idempotent: CREATE OR REPLACE drops and rebuilds the table."""
+    import snowflake.connector
+
+    db = settings.snowflake_database or "EZRA"
+    schema = settings.snowflake_schema or "PUBLIC"
+    conn = snowflake.connector.connect(
+        account=settings.snowflake_account,
+        user=settings.snowflake_user,
+        password=settings.snowflake_password,
+        role=settings.snowflake_role or None,
+        warehouse=settings.snowflake_warehouse or None,
+    )
+    try:
+        cur = conn.cursor()
+        cur.execute(f"CREATE DATABASE IF NOT EXISTS {db}")
+        cur.execute(f"CREATE SCHEMA IF NOT EXISTS {db}.{schema}")
+        cols_ddl = ", ".join(f"{name} {typ}" for name, typ in _SF_RESULT_COLS)
+        cur.execute(f"CREATE OR REPLACE TABLE {db}.{schema}.RACE_RESULTS ({cols_ddl})")
+        names = [c[0] for c in _SF_RESULT_COLS]
+        placeholders = ", ".join(["%s"] * len(names))
+        insert = f"INSERT INTO {db}.{schema}.RACE_RESULTS ({', '.join(names)}) VALUES ({placeholders})"
+        keys = ["season", "round", "race_name", "circuit", "date", "position",
+                "driver", "constructor", "grid", "status", "points"]
+        params = [tuple(r.get(k) for k in keys) for r in rows]
+        for start in range(0, len(params), batch_size):
+            cur.executemany(insert, params[start : start + batch_size])
+        conn.commit()
+        return len(params)
+    finally:
+        conn.close()
+
+
+def load_results_to_bigquery(settings, rows: list[dict], *, table: Optional[str] = None) -> int:
+    """Load ``rows`` into a BigQuery table (keyless via ADC / Workload Identity).
+
+    Creates the dataset + table if needed and replaces its contents. Returns the
+    row count. The table also enables the BigQuery mesh connector's native
+    ``FOR SYSTEM_TIME AS OF`` time-travel on data we own. Lazy SDK import.
+    """
+    from google.cloud import bigquery
+
+    table = table or os.environ.get(
+        "EZRA_BQ_F1_TABLE",
+        f"{settings.bigquery_project or 'ezra-498021'}."
+        f"{settings.bigquery_dataset or 'formula_1'}.race_results",
+    )
+    project = table.split(".")[0]
+    dataset_id = ".".join(table.split(".")[:2])
+    client = bigquery.Client(project=project)
+    client.create_dataset(bigquery.Dataset(dataset_id), exists_ok=True)
+
+    schema = [
+        bigquery.SchemaField("season", "INTEGER"),
+        bigquery.SchemaField("round", "INTEGER"),
+        bigquery.SchemaField("race_name", "STRING"),
+        bigquery.SchemaField("circuit", "STRING"),
+        bigquery.SchemaField("date", "STRING"),
+        bigquery.SchemaField("position", "STRING"),
+        bigquery.SchemaField("driver", "STRING"),
+        bigquery.SchemaField("constructor", "STRING"),
+        bigquery.SchemaField("grid", "STRING"),
+        bigquery.SchemaField("status", "STRING"),
+        bigquery.SchemaField("points", "STRING"),
+    ]
+    keys = [f.name for f in schema]
+    job_config = bigquery.LoadJobConfig(
+        schema=schema, write_disposition="WRITE_TRUNCATE"
+    )
+    payload = [{k: r.get(k) for k in keys} for r in rows]
+    client.load_table_from_json(payload, table, job_config=job_config).result()
+    return len(payload)
+
+
 async def _main() -> None:  # pragma: no cover - script entry point
     from pymongo import AsyncMongoClient
 
@@ -554,7 +643,24 @@ async def _main() -> None:  # pragma: no cover - script entry point
     total = sum(counts.values())
     for name, n in counts.items():
         print(f"  {name}: {n}")
-    print(f"Done. {total} rows across {len(counts)} collections.")
+    print(f"Done (MongoDB). {total} rows across {len(counts)} collections.")
+
+    # Mirror the historical results into the warehouses the mesh connectors query,
+    # so the federation story spans MongoDB + Snowflake + BigQuery on data we own.
+    results = dataset.get("race_results", [])
+    if results and os.environ.get("EZRA_INGEST_SNOWFLAKE", "true").lower() == "true" \
+            and settings.snowflake_account:
+        try:
+            n = await asyncio.to_thread(load_results_to_snowflake, settings, results)
+            print(f"Done (Snowflake). {n} rows in EZRA.PUBLIC.RACE_RESULTS.")
+        except Exception as exc:
+            print(f"WARN snowflake load failed: {exc}")
+    if results and include_bigquery:
+        try:
+            n = await asyncio.to_thread(load_results_to_bigquery, settings, results)
+            print(f"Done (BigQuery). {n} rows loaded.")
+        except Exception as exc:
+            print(f"WARN bigquery load failed: {exc}")
 
 
 if __name__ == "__main__":  # pragma: no cover

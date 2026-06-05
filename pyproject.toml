@@ -36,6 +36,7 @@ ml = [
 ingest = [
     "fastf1>=3.3",
     "google-cloud-bigquery>=3.20",
+    "snowflake-connector-python>=3.12",
 ]
 # Google ADK — the agent runtime that consumes Ezra (real multi-agent demo).
 # Installed in the dev image + the GKE agents image; unit tests stub the runner.
