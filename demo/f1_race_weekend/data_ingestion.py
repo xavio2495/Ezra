@@ -151,6 +151,50 @@ async def fetch_openf1_weather(
     return out
 
 
+async def fetch_openf1_stints(client: httpx.AsyncClient, *, session_key: int) -> list[dict]:
+    """Real tyre stints (compound + age) — core data for the tyre engineer."""
+    rows = await _get_json(client, f"{OPENF1_URL}/stints", {"session_key": session_key})
+    return [{
+        "session_key": session_key,
+        "driver_number": s.get("driver_number"),
+        "stint_number": s.get("stint_number"),
+        "compound": s.get("compound"),
+        "lap_start": s.get("lap_start"),
+        "lap_end": s.get("lap_end"),
+        "tyre_age_at_start": s.get("tyre_age_at_start"),
+        "topics": ["tyres", "telemetry"],
+    } for s in rows]
+
+
+async def fetch_openf1_pit(client: httpx.AsyncClient, *, session_key: int) -> list[dict]:
+    """Real pit stops — pit lane duration per stop (race strategy)."""
+    rows = await _get_json(client, f"{OPENF1_URL}/pit", {"session_key": session_key})
+    return [{
+        "session_key": session_key,
+        "driver_number": p.get("driver_number"),
+        "lap_number": p.get("lap_number"),
+        "pit_duration": p.get("pit_duration"),
+        "date": p.get("date"),
+        "topics": ["strategy", "telemetry"],
+    } for p in rows]
+
+
+async def fetch_openf1_race_control(
+    client: httpx.AsyncClient, *, session_key: int
+) -> list[dict]:
+    """Real FIA race-control messages (flags, safety cars, penalties) — press/strategy."""
+    rows = await _get_json(client, f"{OPENF1_URL}/race_control", {"session_key": session_key})
+    return [{
+        "session_key": session_key,
+        "date": rc.get("date"),
+        "category": rc.get("category"),
+        "flag": rc.get("flag"),
+        "message": rc.get("message"),
+        "scope": rc.get("scope"),
+        "topics": ["press", "strategy"],
+    } for rc in rows]
+
+
 # --------------------------------------------------------------------------- #
 # Heavier sources — BigQuery public F1 dataset + FastF1 timing. Their SDKs are
 # lazy/injected so the lean API image and the unit tests never need them; on GKE
@@ -365,6 +409,10 @@ async def build_wide_dataset(
     polite_delay: float = 0.3,
     include_bigquery: bool = False,
     include_fastf1: bool = False,
+    include_openf1: bool = True,
+    include_enterprise: bool = True,
+    openf1_seasons: Optional[range] = None,
+    enterprise_start_season: int = 2010,
     bq_client=None,
     bq_project: str = "",
     fastf1_loader=None,
@@ -373,8 +421,10 @@ async def build_wide_dataset(
     """Build the full historical corpus across ``seasons`` + the team systems.
 
     Loops every season for results + both standings, adds the all-time circuit
-    reference, and merges the synthesised team systems. Heavy sources (BigQuery,
-    FastF1) are opt-in. One flaky season must not abort the whole grind.
+    reference, real OpenF1 telemetry (stints/pit/laps/race-control) for recent
+    seasons, and a large synthetic enterprise dataset (aero / parts / supplier /
+    freight / crew) keyed to the real calendar. Heavy sources (BigQuery, FastF1)
+    are opt-in. One flaky source must not abort the whole grind.
     """
     own = client is None
     client = client or httpx.AsyncClient(timeout=60.0)
@@ -408,6 +458,23 @@ async def build_wide_dataset(
         data["constructor_standings"] = c_standings
         data["circuits"] = await _try("circuits", fetch_circuits(client, polite_delay=polite_delay))
 
+        # Real OpenF1 telemetry (2023+): stints, pit, laps, FIA race-control events.
+        if include_openf1:
+            of1_seasons = openf1_seasons or range(2023, (seasons.stop))
+            data.update(await _try_openf1(client, of1_seasons, polite_delay))
+
+        # Large synthetic enterprise dataset, keyed to the real calendar.
+        if include_enterprise:
+            from demo.f1_race_weekend.synthesised.generate import (
+                calendar_from_results,
+                generate_enterprise,
+            )
+
+            calendar = calendar_from_results(results)
+            data.update(
+                generate_enterprise(calendar, start_season=enterprise_start_season)
+            )
+
         if include_bigquery:
             try:
                 data["historical_results"] = fetch_bigquery_f1(bq_client, project=bq_project)
@@ -422,6 +489,36 @@ async def build_wide_dataset(
     finally:
         if own:
             await client.aclose()
+
+
+async def _try_openf1(client, seasons: range, polite_delay: float) -> dict[str, list[dict]]:
+    """Best-effort OpenF1 telemetry across ``seasons`` (real car/session data)."""
+    out: dict[str, list[dict]] = {"stints": [], "pit_stops": [], "laps_summary": [],
+                                  "race_control": [], "weather": []}
+    for year in seasons:
+        try:
+            sessions = await fetch_openf1_sessions(client, year=year)
+        except Exception as exc:
+            print(f"WARN openf1.sessions.{year} failed: {exc}")
+            continue
+        races = [s for s in sessions if s.get("session_name") == "Race"]
+        for s in races:
+            key = s.get("session_key")
+            if not key:
+                continue
+            for label, coro in (
+                ("stints", fetch_openf1_stints(client, session_key=key)),
+                ("pit_stops", fetch_openf1_pit(client, session_key=key)),
+                ("race_control", fetch_openf1_race_control(client, session_key=key)),
+                ("weather", fetch_openf1_weather(client, session_key=key)),
+            ):
+                try:
+                    out[label] += await coro
+                except Exception as exc:
+                    print(f"WARN openf1.{label}.{key} failed: {exc}")
+            if polite_delay:
+                await asyncio.sleep(polite_delay)
+    return out
 
 
 async def build_live_dataset(
@@ -617,14 +714,27 @@ async def _main() -> None:  # pragma: no cover - script entry point
     wide = os.environ.get("EZRA_INGEST_WIDE", "true").lower() == "true"
     season_start = int(os.environ.get("EZRA_INGEST_SEASON_START", "1950"))
     season_end = int(os.environ.get("EZRA_INGEST_SEASON_END", "2025"))
+    # Higher delay stays under Jolpica's ~500/hr unauthenticated limit → fewer 429s
+    # and a more complete pull (at the cost of wall time). Tune per run.
+    polite_delay = float(os.environ.get("EZRA_INGEST_POLITE_DELAY", "0.3"))
+    include_openf1 = os.environ.get("EZRA_INGEST_OPENF1", "true").lower() == "true"
+    include_enterprise = os.environ.get("EZRA_INGEST_ENTERPRISE", "true").lower() == "true"
+    enterprise_start = int(os.environ.get("EZRA_ENTERPRISE_START_SEASON", "2010"))
 
     if wide:
         seasons = range(season_start, season_end + 1)
-        print(f"Fetching WIDE F1 corpus: seasons {season_start}–{season_end}"
+        print(f"Fetching WIDE F1 corpus: seasons {season_start}–{season_end} "
+              f"(delay={polite_delay}s)"
+              f"{' + OpenF1' if include_openf1 else ''}"
+              f"{' + enterprise' if include_enterprise else ''}"
               f"{' + BigQuery' if include_bigquery else ''}"
               f"{' + FastF1' if include_fastf1 else ''} (this takes a while)…")
         dataset = await build_wide_dataset(
             seasons=seasons,
+            polite_delay=polite_delay,
+            include_openf1=include_openf1,
+            include_enterprise=include_enterprise,
+            enterprise_start_season=enterprise_start,
             include_bigquery=include_bigquery,
             include_fastf1=include_fastf1,
             bq_project=project,

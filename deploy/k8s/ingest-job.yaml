@@ -15,7 +15,7 @@ metadata:
 spec:
   backoffLimit: 1
   ttlSecondsAfterFinished: 3600
-  activeDeadlineSeconds: 5400   # the full 1950→2025 grind is rate-limited; allow 90 min
+  activeDeadlineSeconds: 21600  # full 1950→2025 grind is Jolpica-rate-limited; allow 6h
   template:
     spec:
       serviceAccountName: ezra-api
@@ -42,6 +42,14 @@ spec:
               value: "true"
             - name: EZRA_INGEST_BIGQUERY
               value: "true"
+            # Real OpenF1 telemetry (2023+) + the large synthetic enterprise dataset.
+            - name: EZRA_INGEST_OPENF1
+              value: "true"
+            - name: EZRA_INGEST_ENTERPRISE
+              value: "true"
+            # 1.2s keeps us comfortably under Jolpica's ~500/hr limit → complete pull.
+            - name: EZRA_INGEST_POLITE_DELAY
+              value: "1.2"
             # FastF1 timing needs a heavier pull; off for the wide run by default.
             - name: EZRA_INGEST_FASTF1
               value: "false"

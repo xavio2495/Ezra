@@ -9,6 +9,7 @@ from demo.f1_race_weekend.data_ingestion import (
     fetch_driver_standings,
     fetch_fastf1_session,
     fetch_jolpica_results,
+    fetch_openf1_stints,
     fetch_season_results,
 )
 
@@ -166,6 +167,10 @@ _CIRCUITS = {"MRData": {"total": "2", "CircuitTable": {"Circuits": [
      "Location": {"locality": "Silverstone", "country": "UK", "lat": "52.0", "long": "-1.0"}}]}}}
 
 
+_STINTS = [{"driver_number": 1, "stint_number": 1, "compound": "SOFT",
+            "lap_start": 1, "lap_end": 20, "tyre_age_at_start": 0}]
+
+
 def _wide_handler(request: httpx.Request) -> httpx.Response:
     url = str(request.url)
     if "/results.json" in url:
@@ -176,6 +181,13 @@ def _wide_handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=_CONSTRUCTOR_STANDINGS)
     if "/circuits.json" in url:
         return httpx.Response(200, json=_CIRCUITS)
+    if "openf1.org/v1/sessions" in url:
+        return httpx.Response(200, json=_SESSIONS)
+    if "openf1.org/v1/stints" in url:
+        return httpx.Response(200, json=_STINTS)
+    if "openf1.org/v1/pit" in url or "openf1.org/v1/race_control" in url \
+            or "openf1.org/v1/weather" in url:
+        return httpx.Response(200, json=[])
     return httpx.Response(404, json={})
 
 
@@ -202,10 +214,33 @@ async def test_fetch_standings_parse():
 async def test_build_wide_dataset_spans_seasons():
     async with _wide_client() as c:
         data = await build_wide_dataset(
-            seasons=range(2022, 2024), client=c, polite_delay=0.0
+            seasons=range(2022, 2024), client=c, polite_delay=0.0,
+            include_openf1=False, include_enterprise=False,
         )
     # Two seasons × two rounds = four result rows.
     assert len(data["race_results"]) == 4
     assert len(data["driver_standings"]) == 2  # one per season
     assert {ci["circuit_id"] for ci in data["circuits"]} == {"monaco", "silverstone"}
     assert data["parts_inventory"]  # synthesised systems merged in
+
+
+async def test_build_wide_dataset_includes_openf1_and_enterprise():
+    async with _wide_client() as c:
+        data = await build_wide_dataset(
+            seasons=range(2022, 2024), client=c, polite_delay=0.0,
+            include_openf1=True, openf1_seasons=range(2023, 2024),
+            include_enterprise=True, enterprise_start_season=2010,
+        )
+    # Real OpenF1 telemetry pulled.
+    assert data["stints"][0]["compound"] == "SOFT"
+    # Large synthetic enterprise keyed to the fetched calendar.
+    assert data["parts_bom"] and data["aero_configs"]
+    assert data["parts_consumption"]  # consumption at the fetched rounds
+    assert any(r["topics"] == ["logistics", "calendar"] for r in data["freight_logistics"])
+
+
+async def test_fetch_openf1_stints_parses():
+    async with _wide_client() as c:
+        rows = await fetch_openf1_stints(c, session_key=9999)
+    assert rows[0]["compound"] == "SOFT"
+    assert "tyres" in rows[0]["topics"]
