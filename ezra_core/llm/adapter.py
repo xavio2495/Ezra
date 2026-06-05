@@ -94,7 +94,7 @@ class GeminiNliClassifier:
     ``ml`` deps are present; this is the API-backed alternative.
     """
 
-    def __init__(self, model: str = "gemini/gemini-3.1-flash-lite", *, api_key: Optional[str] = None):
+    def __init__(self, model: str = "gemini/gemini-3.5-flash", *, api_key: Optional[str] = None):
         self._model = model
         self._api_key = api_key
 

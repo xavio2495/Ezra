@@ -289,6 +289,7 @@ async def ingest_to_mongo(client, db_name: str, *, dataset: Optional[dict] = Non
 async def _main() -> None:  # pragma: no cover - script entry point
     from pymongo import AsyncMongoClient
 
+    from ezra_core.atlas_access import ensure_egress_allowed
     from ezra_core.config import EzraSettings
     from ezra_core.secret_files import load_secret_files
 
@@ -296,6 +297,7 @@ async def _main() -> None:  # pragma: no cover - script entry point
     settings = EzraSettings()
     if not settings.mongodb_uri:
         raise SystemExit("EZRA_MONGODB_URI is not set — cannot ingest to Atlas.")
+    ensure_egress_allowed(settings)  # allow this job's egress IP on Atlas (no-op locally)
 
     # On GKE these are on by default; locally they need the `ingest` deps + auth,
     # so allow opting out via env.

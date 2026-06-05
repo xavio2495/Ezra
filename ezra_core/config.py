@@ -20,12 +20,11 @@ class EzraSettings(BaseSettings):
         extra="ignore",
     )
 
-    # LLM. Gemini 2.0 Flash/Flash-Lite were shut down 2026-06-01; gemini-3.1-flash
-    # isn't exposed on the AI Studio key, so agents use 2.5-flash and meta-agents
-    # the 3.1 flash-lite (both verified live). Override via EZRA_LLM_MODEL etc.
-    llm_model: str = "gemini/gemini-2.5-flash"
+    # LLM. Gemini 2.0 Flash/Flash-Lite were shut down 2026-06-01; the project now
+    # targets the 3.5-flash line (verified live). Override via EZRA_LLM_MODEL etc.
+    llm_model: str = "gemini/gemini-3.5-flash"
     llm_api_key: str = ""
-    meta_agent_model: str = "gemini/gemini-3.1-flash-lite"
+    meta_agent_model: str = "gemini/gemini-3.5-flash"
     embedding_model: str = "gemini/gemini-embedding-001"
 
     # Storage
@@ -33,6 +32,13 @@ class EzraSettings(BaseSettings):
     mongodb_db: str = "ezra"
     redis_url: str = "redis://localhost:6379"
     qdrant_url: str = "http://localhost:6333"
+
+    # Atlas Admin API — used to auto-allow the runtime's egress IP so the workload
+    # connects from anywhere (GCP/dynamic IPs) without a manual Network Access step.
+    mongodb_public_key: str = ""
+    mongodb_private_key: str = ""
+    mongodb_atlas_project_id: str = ""  # Atlas project (group) id; auto-discovered if blank
+    atlas_auto_allow_egress: bool = True
 
     # Mesh connectors (federated sources). Blank = connector not configured.
     mongodb_mcp_url: str = "http://localhost:3001"

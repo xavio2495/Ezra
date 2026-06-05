@@ -94,6 +94,7 @@ class Ezra:
         from pymongo import AsyncMongoClient
         from qdrant_client import AsyncQdrantClient
 
+        from ezra_core.atlas_access import ensure_egress_allowed
         from ezra_core.belief.branching import MongoBranchStore
         from ezra_core.llm.adapter import GeminiEmbedder, llm_from_settings
         from ezra_core.observability.tracer import tracer_from_settings
@@ -101,6 +102,8 @@ class Ezra:
         from ezra_core.tiers.cold import cold_tier_from_settings
         from ezra_core.tiers.hot import hot_tier_from_settings
 
+        # Allow this runtime's egress IP on Atlas before connecting (no-op locally).
+        ensure_egress_allowed(settings)
         cold = cold_tier_from_settings(settings)
         client: AsyncMongoClient = cold.client
         graph_store = MongoSessionGraphStore(client, settings.mongodb_db)
