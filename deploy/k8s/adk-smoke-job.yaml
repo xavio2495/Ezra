@@ -35,6 +35,14 @@ spec:
             # (not free / 404s out-of-the-box), so the smoke uses Gemini Flash-Lite.
             - name: EZRA_SMOKE_MODEL
               value: "vertex_ai/gemini-2.5-flash-lite"
+            # Part 3: the NL→SQL translator routes through the meta model. AI Studio
+            # keys are blocked from GCP egress, so use Vertex (keyless) here.
+            - name: EZRA_LLM_MODEL
+              value: "vertex_ai/gemini-2.5-flash"
+            - name: EZRA_META_AGENT_MODEL
+              value: "vertex_ai/gemini-2.5-flash"
+            - name: EZRA_EMBEDDING_MODEL
+              value: "vertex_ai/text-embedding-005"
             - name: GOOGLE_GENAI_USE_VERTEXAI
               value: "true"
             - name: GOOGLE_CLOUD_PROJECT

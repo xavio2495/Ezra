@@ -111,11 +111,40 @@ async def part2_llm_agent(api_url: str, token: str | None) -> dict:
     return {"response": text, "beliefs": sorted(_claims(snap))}
 
 
+async def part3_nl_to_sql(settings) -> dict:
+    """NL→native translation against REAL Snowflake: a natural-language intent is
+    translated (Vertex meta model) into a constrained pushdown query and run on
+    EZRA.PUBLIC.RACE_RESULTS — proving a filtered query, not SELECT *."""
+    from ezra_core.mesh.connectors import snowflake_connector_from_settings
+
+    columns = {
+        "SEASON": "int", "ROUND": "int", "CIRCUIT": "str",
+        "DRIVER": "str", "CONSTRUCTOR": "str", "POSITION": "int",
+    }
+    conn = snowflake_connector_from_settings(
+        settings, "EZRA.PUBLIC.RACE_RESULTS", topics=["strategy"], columns=columns
+    )
+    # Season filter matches real rows regardless of circuit-name spelling.
+    intent = os.environ.get("EZRA_SMOKE_INTENT", "all race results from the 2023 season")
+    sql = conn.build_sql(intent)  # the translated, validated query
+    result = await conn.fetch(intent, "strategist", ["strategy"])
+    rows = len(result.data) if isinstance(result.data, list) else 0
+    return {
+        "intent": intent,
+        "sql": sql,
+        "translated": "WHERE" in sql.upper(),  # a predicate was produced (not SELECT *)
+        "rows": rows,
+        "time_travel": result.provenance.time_travel_available,
+    }
+
+
 async def _main() -> None:  # pragma: no cover - GKE Job entrypoint
     # Secret Manager CSI files (incl. the API bearer token) → EZRA_* env.
+    from ezra_core.config import EzraSettings
     from ezra_core.secret_files import load_secret_files
 
     load_secret_files()
+    settings = EzraSettings()
     api_url = os.environ.get("EZRA_API_URL", "http://ezra-api")
     token = os.environ.get("EZRA_API_BEARER_TOKEN") or None
 
@@ -132,6 +161,17 @@ async def _main() -> None:  # pragma: no cover - GKE Job entrypoint
         print("  beliefs :", p2["beliefs"])
     except Exception as exc:  # noqa: BLE001 — LLM/tool-calling is best-effort
         print(f"  PART 2 skipped/failed (non-fatal): {type(exc).__name__}: {str(exc)[:200]}")
+
+    print("\n=== PART 3: NL→SQL translation against real Snowflake ===")
+    try:
+        p3 = await part3_nl_to_sql(settings)
+        print("  intent     :", p3["intent"])
+        print("  translated :", p3["sql"])
+        print("  has WHERE  :", p3["translated"])
+        print("  rows       :", p3["rows"], "(time_travel:", p3["time_travel"], ")")
+        print(f"  PART 3 {'PASSED' if p3['translated'] and p3['rows'] > 0 else 'INCONCLUSIVE'}")
+    except Exception as exc:  # noqa: BLE001 — best-effort; Part 1 is the gate
+        print(f"  PART 3 skipped/failed (non-fatal): {type(exc).__name__}: {str(exc)[:200]}")
 
     if not p1["ok"]:
         raise SystemExit("PART 1 (deterministic gate) failed")
