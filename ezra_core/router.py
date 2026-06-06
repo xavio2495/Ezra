@@ -36,7 +36,8 @@ from ezra_core.memory.procedural import ProceduralStore
 from ezra_core.meta_agent.learning import LearningMetaAgent, LearningReport
 from ezra_core.observability.tracer import EzraTracer, RouterStep
 from ezra_core.memory.semantic import SemanticStore
-from ezra_core.policy.engine import PolicyEngine
+from ezra_core.parse import IntentParser, ParsedIntent
+from ezra_core.policy.engine import PolicyDeniedError, PolicyEngine
 from ezra_core.schemas.belief import Commitment, Contradiction, Resolution
 from ezra_core.schemas.context import AssembledContext, ContextSlot, ContextSlotType
 from ezra_core.schemas.memory import ProceduralRule, SemanticFact
@@ -237,6 +238,7 @@ class TurnResult(BaseModel):
     pinned_beliefs: list[Commitment] = Field(default_factory=list)
     mesh_result: Optional[MeshResult] = None
     learning_report: Optional[LearningReport] = None
+    parsed_intent: Optional[ParsedIntent] = None
 
 
 class _AssembledTurn(NamedTuple):
@@ -246,6 +248,7 @@ class _AssembledTurn(NamedTuple):
     context: AssembledContext
     mesh_result: Optional[MeshResult]
     pinned_beliefs: list[Commitment]
+    parsed_intent: Optional["ParsedIntent"] = None
 
 
 class Router:
@@ -268,6 +271,7 @@ class Router:
         warm_limit: int = 5,
         tracer: Optional[EzraTracer] = None,
         learning: Optional[LearningMetaAgent] = None,
+        parser: Optional["IntentParser"] = None,
     ) -> None:
         self._hot = hot
         self._belief = belief_store
@@ -280,6 +284,9 @@ class Router:
         self._warm_limit = warm_limit
         self._tracer = tracer or EzraTracer.disabled()
         self._learning = learning
+        # Step 1 (Parse): when set, the router infers whether a turn needs a live
+        # fetch and on which topics, instead of requiring an explicit mesh_query.
+        self._parser = parser
 
     async def assemble_context(
         self,
@@ -320,19 +327,38 @@ class Router:
         graph_id = agent.session_graph_id
         agent_id = agent.agent_id
 
-        # Step 5 (Fetch) — policy-gated; only if a mesh query was requested.
+        # Step 1 (Parse) — classify intent. When no explicit mesh_query is given,
+        # the parser decides whether this turn needs a live fetch and on which
+        # topics (the spec's intent-driven fetch). Explicit mesh_query bypasses it.
+        parsed: Optional[ParsedIntent] = None
+        fetch_query, fetch_topics = mesh_query, mesh_topics
+        if mesh_query is None and self._parser is not None:
+            with self._tracer.span(RouterStep.PARSE, agent_id=agent_id):
+                parsed = self._parser.parse(user_input, scope=agent.permission_scope)
+            if parsed.needs_fetch and self._mesh is not None:
+                fetch_query = user_input  # the connector translates NL → native
+                fetch_topics = parsed.topics
+
+        # Step 5 (Fetch) — policy-gated; runs on an explicit query or an
+        # intent-driven decision. A policy denial on an *inferred* fetch is not
+        # fatal (the agent didn't ask for it) — the turn proceeds without it.
         mesh_result: Optional[MeshResult] = None
-        if mesh_query and self._mesh is not None:
+        if fetch_query and self._mesh is not None:
             with self._tracer.span(RouterStep.FETCH, agent_id=agent_id):
-                mesh_result = await fetch(
-                    connector=self._mesh,
-                    policy=self._policy,
-                    query=mesh_query,
-                    agent_id=agent_id,
-                    permission_scope=list(agent.permission_scope),
-                    topics=mesh_topics,
-                    as_of=as_of,
-                )
+                try:
+                    mesh_result = await fetch(
+                        connector=self._mesh,
+                        policy=self._policy,
+                        query=fetch_query,
+                        agent_id=agent_id,
+                        permission_scope=list(agent.permission_scope),
+                        topics=fetch_topics,
+                        as_of=as_of,
+                    )
+                except PolicyDeniedError:
+                    if mesh_query is not None:
+                        raise  # an explicit fetch that's denied is a real error
+                    mesh_result = None  # inferred fetch denied → just skip it
 
         # Step 3 (Belief) — scope-filtered active commitments become pinned context.
         with self._tracer.span(RouterStep.BELIEF_CHECK, agent_id=agent_id):
@@ -365,6 +391,7 @@ class Router:
             context=context,
             mesh_result=mesh_result,
             pinned_beliefs=belief_snap.commitments,
+            parsed_intent=parsed,
         )
 
     async def run_turn(
@@ -426,6 +453,7 @@ class Router:
             pinned_beliefs=assembled.pinned_beliefs,
             mesh_result=mesh_result,
             learning_report=learning_report,
+            parsed_intent=assembled.parsed_intent,
         )
 
     def _assemble(

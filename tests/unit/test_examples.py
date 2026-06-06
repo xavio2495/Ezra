@@ -79,6 +79,17 @@ async def test_replay_session_is_time_aware():
     assert r["now"] == ["Revised: switch to mediums"]  # superseded by the revision
 
 
+async def test_intent_fetch_parses_translates_and_fetches():
+    from examples import intent_fetch
+
+    r = await _run(intent_fetch)
+    assert r["needs_fetch"] is True
+    # the connector composed a constrained pushdown query (not SELECT *)
+    assert "WHERE circuit = 'Monaco'" in r["translated_sql"]
+    assert "SELECT season, winner" in r["translated_sql"]
+    assert r["rows"] == 2
+
+
 async def test_adk_service_runner_registers_and_drives_the_full_surface():
     import pytest
 

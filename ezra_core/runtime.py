@@ -63,6 +63,7 @@ class Ezra:
         learning: Optional[LearningMetaAgent] = None,
         lifecycle: Optional[LifecycleMetaAgent] = None,
         tracer: Optional[EzraTracer] = None,
+        parser=None,
         closers: tuple = (),
     ) -> None:
         self.settings = settings
@@ -78,6 +79,8 @@ class Ezra:
         self.learning = learning
         self.lifecycle = lifecycle
         self.tracer = tracer or EzraTracer.disabled()
+        # Step-1 intent parser (drives intent-driven fetch); None disables it.
+        self.parser = parser
         self._closers = closers
 
     # -- factories -------------------------------------------------------- #
@@ -134,6 +137,10 @@ class Ezra:
         lifecycle = LifecycleMetaAgent(graph_store, belief_store=cold.beliefs, warm=warm)
         tracer = tracer_from_settings(settings)
 
+        from ezra_core.parse import parser_from_settings
+
+        parser = parser_from_settings(settings)
+
         return cls(
             settings=settings,
             graph_store=graph_store,
@@ -147,6 +154,7 @@ class Ezra:
             learning=learning,
             lifecycle=lifecycle,
             tracer=tracer,
+            parser=parser,
             # Closed in order on aclose(); Redis/Qdrant clients expose aclose().
             closers=(cold, hot._r, qdrant),
         )
@@ -206,6 +214,7 @@ class Ezra:
             salience_decay_rate=self.settings.salience_decay_rate,
             tracer=self.tracer,
             learning=self.learning,
+            parser=self.parser,
         )
 
         def trust_for(other_agent_id: str, topic: str) -> float:
