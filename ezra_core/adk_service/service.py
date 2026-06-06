@@ -20,7 +20,12 @@ from pydantic import BaseModel
 from ezra_core.belief.branching import BranchManager
 from ezra_core.belief.checker import ContradictionChecker
 from ezra_core.belief.history import revert_commitment, rewind_to_turn
-from ezra_core.belief.reconciler import CustomResolver, ResolveContext, reconcile
+from ezra_core.belief.reconciler import (
+    ContradictionCallback,
+    CustomResolver,
+    ResolveContext,
+    reconcile,
+)
 from ezra_core.belief.replay import reconstruct_state_at_turn, snapshot_now
 from ezra_core.belief.store import BeliefStore
 from ezra_core.mesh.base import BaseConnector
@@ -66,6 +71,7 @@ class EzraService:
         policy: Optional[PolicyEngine] = None,
         merge_strategy: MergeStrategy = "last_write_wins",
         custom_resolver: Optional[CustomResolver] = None,
+        on_contradiction: Optional[ContradictionCallback] = None,
         manual_resolution_timeout_seconds: int = 30,
         trust_for: Optional[Callable[[str, str], float]] = None,
         on_reconciled: Optional[
@@ -85,6 +91,9 @@ class EzraService:
         self._policy = policy or PolicyEngine(enabled=False)
         self._merge_strategy = merge_strategy
         self._custom_resolver = custom_resolver
+        # Manual-mode callback (registered via @ezra.on_contradiction); the
+        # reconciler blocks on it up to manual_resolution_timeout_seconds.
+        self._on_contradiction = on_contradiction
         self._manual_timeout = manual_resolution_timeout_seconds
         # (agent_id, topic) -> trust score; defaults to 1.0 when unknown.
         self._trust_for = trust_for or (lambda agent_id, topic: 1.0)
@@ -198,6 +207,7 @@ class EzraService:
                     new_trust=trust_score,
                     manual_resolution_timeout_seconds=self._manual_timeout,
                     custom_resolver=self._custom_resolver,
+                    on_contradiction=self._on_contradiction,
                     resolve_context=ResolveContext(
                         topic=topic,
                         existing_agent_id=contradiction.existing_agent_id,

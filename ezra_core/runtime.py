@@ -81,6 +81,10 @@ class Ezra:
         self.tracer = tracer or EzraTracer.disabled()
         # Step-1 intent parser (drives intent-driven fetch); None disables it.
         self.parser = parser
+        # Manual-mode contradiction callback, registered via @ezra.on_contradiction.
+        # Threaded into every agent's EzraService; the reconciler awaits it for
+        # `manual` graphs (up to manual_resolution_timeout_seconds).
+        self._on_contradiction = None
         self._closers = closers
 
     # -- factories -------------------------------------------------------- #
@@ -186,6 +190,25 @@ class Ezra:
             manual_resolution_timeout_seconds=self.settings.manual_resolution_timeout_seconds,
         )
 
+    def on_contradiction(self, callback):
+        """Register the manual-mode contradiction callback (decorator sugar).
+
+        For graphs with ``merge_strategy="manual"``, the reconciler hands the
+        contradiction to this callback and blocks on its decision (up to the
+        manual-resolution timeout). The callback receives a ``ContradictionEvent``
+        and returns one of ``"accept_new"`` / ``"keep_existing"`` / ``"escalate"``::
+
+            @ezra.on_contradiction
+            async def resolve(event):
+                ...
+                return "keep_existing"
+
+        Agents spawned after registration pick it up. Returns the callback so it
+        stays usable when applied as a decorator. Registering again replaces it.
+        """
+        self._on_contradiction = callback
+        return callback
+
     async def spawn_agent(
         self,
         graph: SessionGraph,
@@ -262,6 +285,7 @@ class Ezra:
             policy=self.policy,
             merge_strategy=graph.record.merge_strategy,
             custom_resolver=graph.custom_resolver,
+            on_contradiction=self._on_contradiction,
             manual_resolution_timeout_seconds=self.settings.manual_resolution_timeout_seconds,
             trust_for=trust_for,
             on_reconciled=on_reconciled,

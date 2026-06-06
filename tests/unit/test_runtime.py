@@ -122,6 +122,61 @@ async def test_belief_check_reaches_injected_checker():
     assert await svc.belief_check("run mediums", "tyres") is contradiction
 
 
+async def test_on_contradiction_decorator_drives_manual_reconciliation():
+    contradiction = Contradiction(
+        existing_commitment_id="c1",
+        existing_agent_id="tyre",
+        new_input_claim="run mediums",
+        new_agent_id="strategist",
+        topic="tyres",
+        similarity_score=0.9,
+        nli_confidence=0.88,
+        detected_at=datetime.now(timezone.utc),
+    )
+    ezra = _ezra(checker=StubChecker(contradiction))
+
+    seen = {}
+
+    @ezra.on_contradiction
+    async def resolve(event):
+        seen["topic"] = event.contradiction.topic
+        return "keep_existing"  # manual operator keeps the existing claim
+
+    graph = await ezra.create_session_graph(
+        session_graph_id="race-1", merge_strategy="manual"
+    )
+    svc = await ezra.spawn_agent(graph, agent_id="strategist", permission_scope=["tyres"])
+
+    result = await svc.commit("run mediums", "tyres", turn_index=2)
+
+    # The callback was invoked and its decision drove the resolution.
+    assert seen["topic"] == "tyres"
+    assert result.resolution is not None
+    assert result.resolution.decision == "keep_existing"
+    assert result.resolution.merge_strategy_used == "manual"
+
+
+async def test_manual_mode_without_callback_falls_back():
+    contradiction = Contradiction(
+        existing_commitment_id="c1",
+        existing_agent_id="tyre",
+        new_input_claim="run mediums",
+        new_agent_id="strategist",
+        topic="tyres",
+        similarity_score=0.9,
+        nli_confidence=0.88,
+        detected_at=datetime.now(timezone.utc),
+    )
+    ezra = _ezra(checker=StubChecker(contradiction))  # no @on_contradiction registered
+    graph = await ezra.create_session_graph(
+        session_graph_id="race-1", merge_strategy="manual"
+    )
+    svc = await ezra.spawn_agent(graph, agent_id="strategist", permission_scope=["tyres"])
+
+    result = await svc.commit("run mediums", "tyres", turn_index=2)
+    assert result.resolution.merge_strategy_used == "manual_no_callback_fallback"
+
+
 async def test_spawn_agent_with_user_id_runs_learning_and_persists_facts():
     ezra = _ezra(with_meta_agents=True)
     graph = await ezra.create_session_graph(session_graph_id="race-1")
