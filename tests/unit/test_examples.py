@@ -77,3 +77,19 @@ async def test_replay_session_is_time_aware():
     r = await _run(replay_session)
     assert r["at_turn_3"] == ["Start on softs"]  # original plan still active at t3
     assert r["now"] == ["Revised: switch to mediums"]  # superseded by the revision
+
+
+async def test_adk_service_runner_registers_and_drives_the_full_surface():
+    import pytest
+
+    pytest.importorskip("google.adk")
+    from examples import adk_service_runner
+
+    r = await _run(adk_service_runner)
+    assert r["runner_has_memory_service"] is True
+    assert "rewind_beliefs" in r["tool_names"] and "revert_belief" in r["tool_names"]
+    # rewind to turn 1 undoes the turn-2 (strategy) commit; revert then drops the opener.
+    assert r["before_rewind"] == ["plan a one-stop", "start on softs"]
+    assert r["after_rewind"] == ["start on softs"]
+    assert r["after_revert"] == []
+    assert r["revert_status"] == "success"

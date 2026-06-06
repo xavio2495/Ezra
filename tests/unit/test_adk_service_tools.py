@@ -66,10 +66,16 @@ def _service(scope=("final_stint",), **kw):
     )
 
 
-def test_ezra_adk_tools_returns_the_four_named_tools():
+_EXPECTED_TOOLS = [
+    "recall", "belief_snapshot", "fetch_federated", "commit_belief",
+    "revert_belief", "rewind_beliefs", "replay_beliefs", "branch_beliefs",
+]
+
+
+def test_ezra_adk_tools_returns_the_full_named_surface():
     svc, _ = _service()
     names = [f.__name__ for f in ezra_adk_tools(svc, turns=TurnCounter())]
-    assert names == ["recall", "belief_snapshot", "fetch_federated", "commit_belief"]
+    assert names == _EXPECTED_TOOLS
 
 
 def test_ezra_adk_tools_accepts_turns_and_events_positionally():
@@ -78,9 +84,7 @@ def test_ezra_adk_tools_accepts_turns_and_events_positionally():
     svc, _ = _service()
     events: list = []
     tools = ezra_adk_tools(svc, TurnCounter(), events)
-    assert [f.__name__ for f in tools] == [
-        "recall", "belief_snapshot", "fetch_federated", "commit_belief"
-    ]
+    assert [f.__name__ for f in tools] == _EXPECTED_TOOLS
 
 
 async def test_commit_belief_tool_detects_and_records_contradiction():
@@ -124,5 +128,5 @@ def test_build_ezra_agent_registers_ezra_toolset():
     )
     assert agent.name == "strategist"
     assert isinstance(turns, TurnCounter)
-    # the four Ezra tools are registered on the agent
-    assert len(agent.tools) == 4
+    # the full Ezra tool surface is registered on the agent
+    assert len(agent.tools) == len(_EXPECTED_TOOLS)

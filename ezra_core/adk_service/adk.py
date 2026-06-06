@@ -144,7 +144,79 @@ def ezra_adk_tools(
                 events.append(detail)
         return result
 
-    return [recall, belief_snapshot, fetch_federated, commit_belief]
+    async def revert_belief(commitment_id: str, reason: str) -> dict:
+        """Undo a single previously-committed belief (git-revert). The belief
+        leaves the active state but the full history is preserved.
+
+        Args:
+            commitment_id: The id of the commitment to revert.
+            reason: Why it is being reverted, one short phrase.
+        """
+        try:
+            marker = await service.revert(
+                commitment_id, reason=reason, turn_index=turns.next()
+            )
+        except KeyError:
+            return {"status": "error", "reason": f"no such commitment: {commitment_id}"}
+        return {"status": "success", "reverted": commitment_id, "marker_id": marker.id}
+
+    async def rewind_beliefs(turn: int, reason: str) -> dict:
+        """Rewind the whole team's belief state back to how it stood at a turn,
+        undoing every commitment made after it (append-only, fully auditable).
+
+        Args:
+            turn: The turn index to rewind to.
+            reason: Why the team is rewinding, one short phrase.
+        """
+        result = await service.rewind(turn, reason=reason)
+        return {
+            "status": "success",
+            "rewound_to_turn": result.rewound_to_turn,
+            "undone": result.superseded_ids,
+            "restored": result.reactivated_ids,
+        }
+
+    async def replay_beliefs(turn: int) -> dict:
+        """Show the team's belief state as it stood at a prior turn (read-only).
+
+        Args:
+            turn: The turn index to reconstruct the state at.
+        """
+        snap = await service.replay(turn)
+        return {
+            "status": "success",
+            "as_of_turn": turn,
+            "beliefs": [
+                {"agent": c.agent_id, "topic": c.topic, "claim": c.claim}
+                for c in snap.commitments
+            ],
+        }
+
+    async def branch_beliefs(turn: int, branch_id: str) -> dict:
+        """Fork a counterfactual branch from a prior turn (a separate what-if graph
+        seeded with the state as it stood then). Use replay/rewind on the live
+        graph; use this to explore an alternative without touching it.
+
+        Args:
+            turn: The turn index to branch from.
+            branch_id: A name for the new branch.
+        """
+        try:
+            branch = await service.branch_from(turn, branch_id)
+        except RuntimeError as exc:
+            return {"status": "error", "reason": str(exc)}
+        return {"status": "success", "branch_id": branch.branch_id, "from_turn": turn}
+
+    return [
+        recall,
+        belief_snapshot,
+        fetch_federated,
+        commit_belief,
+        revert_belief,
+        rewind_beliefs,
+        replay_beliefs,
+        branch_beliefs,
+    ]
 
 
 def adk_model_id(llm_model: str) -> str:
