@@ -8,6 +8,7 @@
 			<a href="/#architecture">Architecture</a>
 			<a href="/#differentiators">Compare</a>
 			<a href="/docs">Docs</a>
+			<a href="/dashboard">Dashboard</a>
 			<a href="/pitch" class="special">Pitch</a>
 			<a href="/quickstart">Quick Start</a>
 			<a href="/#cta" class="nav-get-access">Get Access →</a>

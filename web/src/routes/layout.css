@@ -240,10 +240,10 @@ header.nav {
   border-bottom: 1px solid var(--line);
 }
 
-/* 8 equal columns: brand + 7 nav links */
+/* 9 equal columns: brand + 8 nav links */
 .nav-inner {
   display: grid;
-  grid-template-columns: repeat(8, 1fr);
+  grid-template-columns: repeat(9, 1fr);
   align-items: stretch;
   min-height: var(--nav-h);
   width: 100%;
@@ -1030,7 +1030,7 @@ footer {
 /* ========== RESPONSIVE ========== */
 
 @media (max-width: 1200px) {
-  .nav-inner { grid-template-columns: auto repeat(6, 1fr) auto; }
+  .nav-inner { grid-template-columns: auto repeat(7, 1fr) auto; }
   .nav-links a { font-size: 9.5px; padding: 0 6px; letter-spacing: 0.1em; }
   .brand-logo { height: 20px; }
 }
