@@ -1,8 +1,8 @@
 """MongoDB connector (Atlas via the official MCP server in production; here it
 runs find/aggregate against an Atlas collection). MongoDB has NO query-time
 time-travel — ``time_travel_available`` is always False, and ``as_of`` is
-ignored. For historical state use versioned-document patterns at the app layer
-(see docs/connectors.md).
+ignored. For historical state from MongoDB, use versioned-document patterns at
+the application layer (Snowflake/BigQuery provide native query-time time-travel).
 """
 
 from __future__ import annotations

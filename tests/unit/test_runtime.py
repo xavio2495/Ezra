@@ -142,7 +142,7 @@ async def test_spawn_agent_with_user_id_runs_learning_and_persists_facts():
 async def test_run_lifecycle_tick_closes_idle_graph():
     ezra = _ezra(with_meta_agents=True)
     graph = await ezra.create_session_graph(session_graph_id="race-1")
-    svc = await ezra.spawn_agent(graph, agent_id="tyre", permission_scope=["tyres"])
+    await ezra.spawn_agent(graph, agent_id="tyre", permission_scope=["tyres"])
     await graph.terminate_agent("tyre")
 
     report = await ezra.run_lifecycle_tick("race-1")

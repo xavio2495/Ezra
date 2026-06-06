@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from ezra_core.belief.branching import BranchManager, InMemoryBranchStore
-from ezra_core.belief.replay import reconstruct_state_at_turn, snapshot_now
+from ezra_core.belief.replay import snapshot_now
 from ezra_core.belief.store import InMemoryBeliefStore
 from ezra_core.schemas.belief import Commitment
 from ezra_core.session_graph import InMemorySessionGraphStore, SessionGraph

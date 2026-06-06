@@ -1,14 +1,17 @@
-"""Router — the 8-step per-agent pipeline. This session wires two steps:
+"""Router — the 8-step per-agent pipeline.
 
-  - Step 4 (Hydrate): load scope-filtered core semantic memory from this graph
-    AND every inherited graph at agent spawn; plus inherited procedural rules
-    when the graph enables procedural inheritance.
-  - Step 8 (Write-back): attribute a commitment to the agent and append it to
-    the belief store; optionally persist extracted semantic facts.
+``Router.run_turn`` assembles the smallest high-signal context for one agent turn
+and calls the model: policy-gated mesh fetch (step 5), scope-filtered active
+beliefs (step 3), warm + hot memory hydration (step 4), salience-ranked
+budget-capped assembly (step 6), the LLM call (step 7), and hot-tier write-back
+(step 8); the learning meta-agent then runs after step 8. ``assemble_context``
+exposes steps 3-6 without the model call.
 
-Remaining steps (parse/policy/belief-check/fetch/assemble/LLM) arrive in later
-sessions. LLM-based fact extraction belongs to the learning meta-agent
-(Session 5); write-back here takes explicit, caller-provided facts.
+The module also holds standalone step helpers reused elsewhere:
+``hydrate_at_agent_spawn`` (cross-graph core/procedural memory at spawn),
+``belief_check`` (detect + reconcile a contradiction), ``fetch`` (policy-gated
+federated query), and ``write_back`` (append a commitment, optionally persisting
+extracted semantic facts).
 """
 
 from __future__ import annotations

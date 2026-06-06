@@ -4,7 +4,7 @@ The log is append-only: commitments are never deleted. ``supersede`` and
 ``redact`` flip flags on an existing record (supersession chain / tombstone),
 they do not remove it — the audit chain stays intact.
 
-Follows the Session 1 storage pattern: a ``BeliefStore`` Protocol with an
+Follows the platform's storage pattern: a ``BeliefStore`` Protocol with an
 in-memory implementation for DB-free unit tests and a MongoDB implementation
 for real persistence.
 """

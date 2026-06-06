@@ -16,7 +16,6 @@ for the wide ingest. Every row carries ``topics`` for permission-scope filtering
 from __future__ import annotations
 
 import random
-from typing import Optional
 
 # Default: enterprise systems only make sense for the modern (fictional Team Ezra)
 # era — generating fake aero/freight for 1950 would be incoherent.

@@ -3,7 +3,7 @@ inheritance is enabled) from prior graphs via ``source_graph_ids``."""
 
 from __future__ import annotations
 
-from typing import Optional, Protocol
+from typing import Protocol
 
 from pymongo import AsyncMongoClient
 

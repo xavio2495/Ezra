@@ -6,9 +6,9 @@ branch's belief store with those commitments re-keyed to the branch. From there
 the branch can be mutated and run forward independently, then diffed against the
 parent.
 
-``run_forward`` takes an injected ``step`` coroutine (one turn of agent work) so
-this is testable today; the real LLM/agent runner is wired in once the router +
-llm adapter land.
+``run_forward`` takes an injected ``step`` coroutine (one turn of agent work), so
+the caller supplies the agent runner (a real router turn in production, a stub in
+tests) and this module stays agnostic to how a turn is executed.
 """
 
 from __future__ import annotations

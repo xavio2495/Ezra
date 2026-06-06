@@ -6,16 +6,16 @@ components. Every method is automatically scope-filtered for this agent.
 
 This is deliberately thin: it wires already-built components (belief store,
 warm tier, router, checker, mesh connector, branch manager) to the documented
-``recall / query / belief_check / belief_snapshot / write_back / complete /
-replay / branch_from`` surface. A full composition root (``Ezra.from_env``)
-arrives with the runtime/SDK work.
+``recall / query / belief_check / belief_snapshot / write_back / commit /
+complete / replay / branch_from`` surface. The composition root (``Ezra`` in
+``runtime.py``) builds these and hands one out per agent via ``spawn_agent``.
 """
 
 from __future__ import annotations
 
 from typing import Any, Awaitable, Callable, Optional, Sequence
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from ezra_core.belief.branching import BranchManager
 from ezra_core.belief.checker import ContradictionChecker

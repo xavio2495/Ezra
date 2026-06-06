@@ -108,7 +108,7 @@ class WarmTier:
 
     async def evict_expired(self, *, now: Optional[datetime] = None) -> None:
         """Compaction hook — drop summaries past TTL. (Promotion to cold is the
-        learning meta-agent's job, Session 5.)"""
+        learning meta-agent's job.)"""
         if not await self._client.collection_exists(self._collection):
             return
         now = now or datetime.now(timezone.utc)

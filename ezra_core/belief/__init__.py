@@ -1,4 +1,4 @@
-"""Belief store, two-pass checker, reconciler, replay (branching: Session 4)."""
+"""Belief store, two-pass checker, reconciler, replay, and branching."""
 
 from ezra_core.belief.branching import (
     BranchManager,

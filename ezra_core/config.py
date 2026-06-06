@@ -1,7 +1,7 @@
 """Runtime configuration, loaded from EZRA_* environment variables / .env.
 
-Only the settings used by code that exists today are declared. Unknown EZRA_*
-vars (documented in .env.example for later sessions) are ignored, not errors.
+Only the settings used by the platform are declared. Unknown EZRA_* vars (the
+full reference set lives in .env.example) are ignored, not errors.
 """
 
 from __future__ import annotations
@@ -72,7 +72,7 @@ class EzraSettings(BaseSettings):
     # Policy
     policy_engine_enabled: bool = True
 
-    # Meta-agents (both enabled by default in v4.1)
+    # Meta-agents (both enabled by default)
     meta_agent_learning_enabled: bool = True
     meta_agent_lifecycle_enabled: bool = True
     core_promotion_access_count: int = 3

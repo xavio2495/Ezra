@@ -1,4 +1,4 @@
-"""FastF1 connector (demo only — exercised by the F1 reference demo, Session 5).
+"""FastF1 connector (demo only — exercised by the F1 reference demo).
 
 Limited pushdown, no time-travel. The telemetry source is injected so the heavy
 ``fastf1`` package is never imported by the platform package itself; the demo

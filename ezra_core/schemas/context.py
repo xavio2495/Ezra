@@ -1,4 +1,4 @@
-"""Assembled-context models (router step 6 fills these). Minimal for now."""
+"""Assembled-context models (router step 6 fills these)."""
 
 from __future__ import annotations
 
