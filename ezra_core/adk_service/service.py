@@ -148,7 +148,7 @@ class EzraService:
         turn_index: int,
         type: str = "decision",
         value: Any = None,
-        trust_score: float = 1.0,
+        trust_score: Optional[float] = None,
     ) -> "CommitResult":
         """Commit a belief WITH contradiction handling — the full step-3+8 flow.
 
@@ -157,8 +157,13 @@ class EzraService:
         commitment, and supersedes the loser when the new claim wins. This is the
         surface an agent uses to "say something" through Ezra; the ADK
         ``commit_belief`` tool is a thin wrapper over it.
+
+        ``trust_score`` defaults to THIS agent's per-topic trust (so highest_trust
+        reconciliation reflects the agents' standing, not commit order).
         """
         self._policy.check_topic(self.permission_scope, topic)
+        if trust_score is None:
+            trust_score = self._trust_for(self.agent_id, topic)
 
         contradiction: Optional[Contradiction] = None
         resolution: Optional[Resolution] = None

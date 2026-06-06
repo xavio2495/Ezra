@@ -104,6 +104,29 @@ async def test_commit_highest_trust_existing_wins_keeps_both_records():
     assert active == {"run softs", "run wets"}
 
 
+async def test_commit_defaults_trust_to_agents_own_so_higher_trust_wins():
+    # Existing high-trust commit by 'tyre'; a NEW commit by low-trust 'strategist'
+    # must LOSE under highest_trust even though it commits later — because commit
+    # now defaults the new trust to the agent's own per-topic trust, not 1.0.
+    beliefs = InMemoryBeliefStore()
+    await beliefs.append(_commit("run mediums", "tyres", agent="tyre"))
+    trust = {("tyre", "tyres"): 0.95, ("strategist", "tyres"): 0.80}
+    svc, _ = _service(
+        agent_id="strategist",
+        scope=("tyres",),
+        belief_store=beliefs,
+        merge_strategy="highest_trust",
+        trust_for=lambda a, t: trust.get((a, t), 1.0),
+    )
+    out = await svc.commit("run softs", "tyres", turn_index=2)  # no explicit trust_score
+    assert out.contradiction is not None
+    assert out.resolution.decision == "keep_existing"  # tyre (0.95) beats strategist (0.80)
+    # keep_existing → the old claim is NOT superseded; the new claim is still
+    # appended (audit), so both remain active. The point is the winner, not removal.
+    active = {c.claim for c in await beliefs.get_active("g")}
+    assert active == {"run mediums", "run softs"}
+
+
 async def test_commit_blocked_out_of_scope():
     import pytest
 
@@ -118,8 +141,11 @@ async def test_commit_blocked_out_of_scope():
 async def test_commit_belief_tool_reports_contradiction():
     beliefs = InMemoryBeliefStore()
     await beliefs.append(_commit("run softs", "final_stint", agent="weather"))
+    # committing agent 'strategist' outranks 'weather' on this topic → accept_new.
+    trust = {("strategist", "final_stint"): 0.9, ("weather", "final_stint"): 0.6}
     svc, _ = _service(
-        belief_store=beliefs, merge_strategy="highest_trust", trust_for=lambda a, t: 0.6
+        belief_store=beliefs, merge_strategy="highest_trust",
+        trust_for=lambda a, t: trust.get((a, t), 0.6),
     )
     tools = {f.__name__: f for f in build_tools(svc, TurnCounter())}
 
