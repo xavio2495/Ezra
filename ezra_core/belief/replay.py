@@ -15,7 +15,7 @@ from __future__ import annotations
 from typing import Optional
 
 from ezra_core.belief.store import BeliefStore
-from ezra_core.schemas.belief import BeliefSnapshot, Commitment
+from ezra_core.schemas.belief import MARKER_TYPES, BeliefSnapshot, Commitment
 from ezra_core.scope import filter_by_scope
 
 
@@ -36,7 +36,7 @@ async def reconstruct_state_at_turn(
 
     active: list[Commitment] = []
     for c in history:
-        if c.redacted:
+        if c.redacted or c.type in MARKER_TYPES:
             continue
         # Superseded only counts if the superseding commitment also exists as-of N.
         if c.superseded_by is not None and c.superseded_by in present_ids:

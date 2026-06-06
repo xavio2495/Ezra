@@ -7,13 +7,19 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
+# Append-only audit markers (revert/rewind). They live in the belief log for
+# history but are NOT active beliefs — excluded from get_active / snapshots.
+MARKER_TYPES = frozenset({"revert", "rewind"})
+
 
 class Commitment(BaseModel):
     id: str
     session_graph_id: str
     agent_id: str
     turn_index: int
-    type: Literal["fact", "decision", "calculation", "constraint"]
+    # "revert"/"rewind" are append-only audit markers written by the git-like
+    # history ops (see ezra_core/belief/history.py), not agent-authored claims.
+    type: Literal["fact", "decision", "calculation", "constraint", "revert", "rewind"]
     claim: str
     value: Optional[Any] = None
     topic: str
@@ -83,3 +89,15 @@ class BeliefSnapshot(BaseModel):
     session_graph_id: str
     as_of_turn: Optional[int] = None
     commitments: list[Commitment] = Field(default_factory=list)
+
+
+class RewindResult(BaseModel):
+    """Outcome of an append-only rewind (see ezra_core/belief/history.py): the
+    audit marker, the post-turn commitments that were superseded, and the
+    pre-turn commitments that were reactivated to restore the as-of-turn state."""
+
+    session_graph_id: str
+    rewound_to_turn: int
+    marker_id: str
+    superseded_ids: list[str] = Field(default_factory=list)
+    reactivated_ids: list[str] = Field(default_factory=list)

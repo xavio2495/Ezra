@@ -19,13 +19,20 @@ from pydantic import BaseModel
 
 from ezra_core.belief.branching import BranchManager
 from ezra_core.belief.checker import ContradictionChecker
+from ezra_core.belief.history import revert_commitment, rewind_to_turn
 from ezra_core.belief.reconciler import CustomResolver, ResolveContext, reconcile
 from ezra_core.belief.replay import reconstruct_state_at_turn, snapshot_now
 from ezra_core.belief.store import BeliefStore
 from ezra_core.mesh.base import BaseConnector
 from ezra_core.policy.engine import PolicyEngine
 from ezra_core.router import Router, TurnResult, write_back
-from ezra_core.schemas.belief import BeliefSnapshot, Commitment, Contradiction, Resolution
+from ezra_core.schemas.belief import (
+    BeliefSnapshot,
+    Commitment,
+    Contradiction,
+    Resolution,
+    RewindResult,
+)
 from ezra_core.schemas.branch import Branch
 from ezra_core.schemas.mesh import MeshResult
 from ezra_core.schemas.memory import WarmSummary
@@ -226,6 +233,33 @@ class EzraService:
 
         return CommitResult(
             commitment=commitment, contradiction=contradiction, resolution=resolution
+        )
+
+    async def revert(
+        self, commitment_id: str, *, reason: str, turn_index: int
+    ) -> Commitment:
+        """Git-revert a single commitment: drop it from the active belief state by
+        appending an append-only ``revert`` marker (history is preserved). Returns
+        the marker commitment."""
+        return await revert_commitment(
+            self._belief,
+            session_graph_id=self.session_graph_id,
+            commitment_id=commitment_id,
+            by_agent=self.agent_id,
+            reason=reason,
+            turn_index=turn_index,
+        )
+
+    async def rewind(self, turn: int, *, reason: str) -> RewindResult:
+        """Rewind the live graph to its as-of-``turn`` belief state (append-only):
+        undo every commitment made after ``turn`` and restore the ones a now-undone
+        commitment had superseded. History stays intact and replayable."""
+        return await rewind_to_turn(
+            self._belief,
+            session_graph_id=self.session_graph_id,
+            turn=turn,
+            by_agent=self.agent_id,
+            reason=reason,
         )
 
     async def query(

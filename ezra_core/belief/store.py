@@ -15,7 +15,7 @@ from typing import Optional, Protocol
 
 from pymongo import AsyncMongoClient
 
-from ezra_core.schemas.belief import Commitment
+from ezra_core.schemas.belief import MARKER_TYPES, Commitment
 
 
 class BeliefStore(Protocol):
@@ -31,6 +31,7 @@ class BeliefStore(Protocol):
     ) -> list[Commitment]: ...
     async def supersede(self, commitment_id: str, superseded_by: str) -> None: ...
     async def redact(self, commitment_id: str, reason: str) -> None: ...
+    async def reactivate(self, commitment_id: str) -> None: ...
 
 
 class InMemoryBeliefStore:
@@ -69,6 +70,7 @@ class InMemoryBeliefStore:
             for c in await self.get_all(session_graph_id)
             if not c.superseded
             and not c.redacted
+            and c.type not in MARKER_TYPES
             and (topic is None or c.topic == topic)
         ]
 
@@ -83,6 +85,12 @@ class InMemoryBeliefStore:
         if c is not None:
             c.redacted = True
             c.redaction_reason = reason
+
+    async def reactivate(self, commitment_id: str) -> None:
+        c = self._items.get(commitment_id)
+        if c is not None:
+            c.superseded = False
+            c.superseded_by = None
 
 
 def _strip(doc: dict) -> dict:
@@ -126,6 +134,7 @@ class MongoBeliefStore:
             "session_graph_id": session_graph_id,
             "superseded": False,
             "redacted": False,
+            "type": {"$nin": list(MARKER_TYPES)},
         }
         if topic is not None:
             query["topic"] = topic
@@ -142,4 +151,10 @@ class MongoBeliefStore:
         await self._c.update_one(
             {"_id": commitment_id},
             {"$set": {"redacted": True, "redaction_reason": reason}},
+        )
+
+    async def reactivate(self, commitment_id: str) -> None:
+        await self._c.update_one(
+            {"_id": commitment_id},
+            {"$set": {"superseded": False, "superseded_by": None}},
         )

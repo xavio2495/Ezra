@@ -13,6 +13,7 @@ from ezra_core.belief.checker import (
     NliResult,
     cosine_similarity,
 )
+from ezra_core.belief.history import revert_commitment, rewind_to_turn
 from ezra_core.belief.reconciler import ResolveContext, reconcile
 from ezra_core.belief.replay import reconstruct_state_at_turn, snapshot_now
 from ezra_core.belief.store import (
@@ -27,6 +28,8 @@ __all__ = [
     "MongoBeliefStore",
     "reconstruct_state_at_turn",
     "snapshot_now",
+    "revert_commitment",
+    "rewind_to_turn",
     "ContradictionChecker",
     "Embedder",
     "NliClassifier",
