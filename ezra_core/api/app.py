@@ -8,7 +8,7 @@ testable with ``fastapi.testclient.TestClient`` and no live infra.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Optional
+from typing import TYPE_CHECKING, Callable, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel
@@ -20,11 +20,19 @@ from ezra_core.belief.store import BeliefStore
 from ezra_core.mesh.base import BaseConnector
 from ezra_core.policy.engine import PolicyDeniedError, PolicyEngine
 from ezra_core.router import Router
-from ezra_core.schemas.belief import BeliefSnapshot, Contradiction
+from ezra_core.schemas.belief import BeliefSnapshot, Commitment, Contradiction, RewindResult
 from ezra_core.schemas.branch import Branch, BranchDiff
 from ezra_core.schemas.context import AssembledContext
+from ezra_core.schemas.memory import WarmSummary
 from ezra_core.schemas.mesh import MeshResult
 from ezra_core.schemas.session_graph import AgentRegistration
+
+# CommitResult is used as a FastAPI response model, so it must be importable at
+# runtime (not just for type-checking). No cycle: adk_service never imports api.
+from ezra_core.adk_service.service import CommitResult
+
+if TYPE_CHECKING:
+    from ezra_core.adk_service.service import EzraService
 
 
 class SnapshotRequest(BaseModel):
@@ -82,6 +90,48 @@ class RunForwardRequest(BaseModel):
     until_turn: int
 
 
+class CommitRequest(BaseModel):
+    session_graph_id: str
+    agent_id: str
+    scope: list[str] = []
+    claim: str
+    topic: str
+    turn_index: int
+    type: str = "decision"
+    trust_score: Optional[float] = None
+
+
+class RecallRequest(BaseModel):
+    session_graph_id: str
+    agent_id: str
+    scope: list[str] = []
+    query: str
+    limit: int = 5
+
+
+class RewindRequest(BaseModel):
+    session_graph_id: str
+    agent_id: str
+    scope: list[str] = []
+    turn: int
+    reason: str = ""
+
+
+class RevertRequest(BaseModel):
+    session_graph_id: str
+    agent_id: str
+    scope: list[str] = []
+    commitment_id: str
+    reason: str = ""
+    turn_index: int
+
+
+# (session_graph_id, agent_id, scope) -> a scope-bound EzraService. The
+# composition root supplies this so REST endpoints reuse the real service logic
+# (commit reconciliation, scope checks, history ops) instead of reimplementing it.
+ServiceFactory = Callable[[str, str, list[str]], "EzraService"]
+
+
 def create_app(
     *,
     belief_store: BeliefStore,
@@ -91,6 +141,7 @@ def create_app(
     policy: Optional[PolicyEngine] = None,
     router: Optional[Router] = None,
     forward_step: Optional[ForwardStep] = None,
+    service_factory: Optional[ServiceFactory] = None,
     bearer_token: Optional[str] = None,
 ) -> FastAPI:
     app = FastAPI(title="Ezra", version="0.1.0")
@@ -110,6 +161,7 @@ def create_app(
             "mesh": mesh is not None,
             "branching": branch_manager is not None,
             "router": router is not None,
+            "service": service_factory is not None,
         }
 
     @app.post("/ezra/context/assemble", dependencies=guarded)
@@ -161,6 +213,42 @@ def create_app(
         except PolicyDeniedError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
         return await mesh.fetch(req.query, req.agent_id, req.scope)
+
+    def _service(session_graph_id: str, agent_id: str, scope: list[str]) -> "EzraService":
+        if service_factory is None:
+            raise HTTPException(status_code=400, detail="service surface not configured")
+        return service_factory(session_graph_id, agent_id, scope)
+
+    @app.post("/ezra/commit", dependencies=guarded)
+    async def commit(req: CommitRequest) -> CommitResult:
+        svc = _service(req.session_graph_id, req.agent_id, req.scope)
+        try:
+            return await svc.commit(
+                req.claim, req.topic, turn_index=req.turn_index,
+                type=req.type, trust_score=req.trust_score,
+            )
+        except PolicyDeniedError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+    @app.post("/ezra/recall", dependencies=guarded)
+    async def recall(req: RecallRequest) -> list[WarmSummary]:
+        svc = _service(req.session_graph_id, req.agent_id, req.scope)
+        return await svc.recall(req.query, limit=req.limit)
+
+    @app.post("/ezra/rewind", dependencies=guarded)
+    async def rewind(req: RewindRequest) -> RewindResult:
+        svc = _service(req.session_graph_id, req.agent_id, req.scope)
+        return await svc.rewind(req.turn, reason=req.reason)
+
+    @app.post("/ezra/revert", dependencies=guarded)
+    async def revert(req: RevertRequest) -> Commitment:
+        svc = _service(req.session_graph_id, req.agent_id, req.scope)
+        try:
+            return await svc.revert(
+                req.commitment_id, reason=req.reason, turn_index=req.turn_index
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @app.post("/ezra/replay", dependencies=guarded)
     async def replay(req: ReplayRequest) -> BeliefSnapshot:

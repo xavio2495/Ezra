@@ -193,6 +193,85 @@ async def test_run_forward_with_step_executes_turns():
     assert calls == [("wi", 6), ("wi", 7)]
 
 
+def _app_with_service(beliefs, *, policy=None):
+    """An app whose service_factory builds an EzraService over shared in-memory
+    stores, so commit/recall/rewind/revert exercise the real service logic."""
+    from ezra_core.adk_service.service import EzraService
+
+    def factory(graph_id, agent_id, scope):
+        return EzraService(
+            session_graph_id=graph_id,
+            agent_id=agent_id,
+            permission_scope=scope,
+            belief_store=beliefs,
+            checker=StubChecker(),
+            policy=policy,
+            merge_strategy="last_write_wins",
+        )
+
+    return create_app(
+        belief_store=beliefs, service_factory=factory, policy=policy, bearer_token=TOKEN
+    )
+
+
+async def test_commit_then_rewind_then_revert_over_rest():
+    beliefs = InMemoryBeliefStore()
+    app = _app_with_service(beliefs)
+    async with _client(app) as c:
+        base = {"session_graph_id": "g", "agent_id": "a", "scope": ["tyres"]}
+        r1 = await c.post(
+            "/ezra/commit", headers=AUTH,
+            json={**base, "claim": "softs", "topic": "tyres", "turn_index": 1},
+        )
+        assert r1.status_code == 200
+        cid = r1.json()["commitment"]["id"]
+        await c.post(
+            "/ezra/commit", headers=AUTH,
+            json={**base, "claim": "wets", "topic": "rain", "turn_index": 2},
+        )
+
+        # rewind to turn 1 undoes the turn-2 commit.
+        rw = await c.post("/ezra/rewind", headers=AUTH, json={**base, "turn": 1, "reason": "x"})
+        assert rw.status_code == 200
+        assert rw.json()["rewound_to_turn"] == 1
+
+        snap = await c.post(
+            "/ezra/belief/snapshot", headers=AUTH, json={"session_graph_id": "g"}
+        )
+        assert {x["claim"] for x in snap.json()["commitments"]} == {"softs"}
+
+        # revert the surviving commitment.
+        rv = await c.post(
+            "/ezra/revert", headers=AUTH,
+            json={**base, "commitment_id": cid, "reason": "bad", "turn_index": 3},
+        )
+        assert rv.status_code == 200
+        snap2 = await c.post(
+            "/ezra/belief/snapshot", headers=AUTH, json={"session_graph_id": "g"}
+        )
+        assert snap2.json()["commitments"] == []
+
+
+async def test_recall_returns_empty_without_warm():
+    beliefs = InMemoryBeliefStore()
+    app = _app_with_service(beliefs)
+    async with _client(app) as c:
+        r = await c.post(
+            "/ezra/recall", headers=AUTH,
+            json={"session_graph_id": "g", "agent_id": "a", "scope": ["tyres"], "query": "x"},
+        )
+    assert r.status_code == 200 and r.json() == []
+
+
+async def test_full_surface_endpoints_400_without_factory(client):
+    r = await client.post(
+        "/ezra/commit", headers=AUTH,
+        json={"session_graph_id": "g", "agent_id": "a", "claim": "x",
+              "topic": "t", "turn_index": 1},
+    )
+    assert r.status_code == 400
+
+
 async def test_mesh_query_policy_denied():
     app = create_app(
         belief_store=InMemoryBeliefStore(),

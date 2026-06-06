@@ -36,20 +36,41 @@ def build_app():
 
         return create_app(belief_store=InMemoryBeliefStore(), bearer_token=token)
 
-    from pymongo import AsyncMongoClient
+    # Full surface: build the Ezra runtime and expose every core feature over REST
+    # (belief, branch, commit, recall, rewind, revert) so remote ADK agents can
+    # drive a deployed Ezra. The contradiction checker is left OFF here so commits
+    # over the network never incur embedding/NLI token cost — the in-process fleet
+    # exercises two-pass detection; the remote surface is for belief lifecycle ops
+    # (commit / rewind / revert / branch / replay).
+    from ezra_core.adk_service.service import EzraService
+    from ezra_core.runtime import Ezra
 
-    from ezra_core.belief.branching import BranchManager, MongoBranchStore
-    from ezra_core.belief.store import MongoBeliefStore
-    from ezra_core.session_graph import MongoSessionGraphStore
+    ezra = Ezra.from_settings(settings, build_checker=False)
+    ezra.checker = None
 
-    client = AsyncMongoClient(settings.mongodb_uri)
-    belief = MongoBeliefStore(client, settings.mongodb_db)
-    branches = BranchManager(
-        graph_store=MongoSessionGraphStore(client, settings.mongodb_db),
-        belief_store=belief,
-        branch_store=MongoBranchStore(client, settings.mongodb_db),
+    def service_factory(session_graph_id: str, agent_id: str, scope: list[str]) -> EzraService:
+        return EzraService(
+            session_graph_id=session_graph_id,
+            agent_id=agent_id,
+            permission_scope=scope,
+            belief_store=ezra.belief_store,
+            warm=ezra.warm,
+            checker=ezra.checker,
+            mesh=None,
+            branch_manager=ezra.branch_manager,
+            policy=ezra.policy,
+            merge_strategy=settings.default_merge_strategy,
+            manual_resolution_timeout_seconds=settings.manual_resolution_timeout_seconds,
+        )
+
+    return create_app(
+        belief_store=ezra.belief_store,
+        checker=ezra.checker,
+        branch_manager=ezra.branch_manager,
+        policy=ezra.policy,
+        service_factory=service_factory,
+        bearer_token=token,
     )
-    return create_app(belief_store=belief, branch_manager=branches, bearer_token=token)
 
 
 app = build_app()
