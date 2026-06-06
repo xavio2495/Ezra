@@ -21,6 +21,7 @@ from ezra_core.belief.replay import reconstruct_state_at_turn, snapshot_now
 from ezra_core.belief.store import BeliefStore
 from ezra_core.schemas.belief import Commitment
 from ezra_core.schemas.branch import Branch, BranchDiff
+from ezra_core.schemas.session_graph import AgentRegistration
 from ezra_core.schemas.session_graph import SessionGraph as SessionGraphRecord
 from ezra_core.session_graph import SessionGraphStore
 
@@ -154,6 +155,52 @@ class BranchManager:
         )
         await self._branches.save(branch)
         return commitment
+
+    async def spawn_agent(
+        self,
+        *,
+        branch_id: str,
+        agent_id: str,
+        permission_scope: list[str],
+        role: str = "",
+        at_turn: Optional[int] = None,
+    ) -> AgentRegistration:
+        """Spawn a *new* agent inside a branch — a counterfactual the original
+        never had (the spec's ``branch.spawn_agent``). Registers an
+        ``AgentRegistration`` on the branch's own session-graph record so
+        ``run_forward`` can drive it and ``diff_branches`` attributes its
+        commitments. ``at_turn`` defaults to the branch point + 1 (when, in the
+        counterfactual, this agent comes into existence)."""
+        branch = await self._branches.get(branch_id)
+        if branch is None:
+            raise KeyError(f"branch not found: {branch_id}")
+        record = await self._graphs.get(branch_id)
+        if record is None:
+            raise KeyError(f"branch session graph not found: {branch_id}")
+        if any(a.agent_id == agent_id for a in record.active_agents):
+            raise ValueError(f"agent already active in branch: {agent_id}")
+
+        turn = at_turn if at_turn is not None else branch.parent_turn + 1
+        registration = AgentRegistration(
+            agent_id=agent_id,
+            session_graph_id=branch_id,
+            role=role,
+            permission_scope=permission_scope,
+            spawned_at=_utcnow(),
+        )
+        record.active_agents.append(registration)
+        await self._graphs.save(record)
+
+        branch.spawned_agents.append(
+            {
+                "agent_id": agent_id,
+                "permission_scope": permission_scope,
+                "role": role,
+                "at_turn": turn,
+            }
+        )
+        await self._branches.save(branch)
+        return registration
 
     async def run_forward(
         self,

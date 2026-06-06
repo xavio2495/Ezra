@@ -15,6 +15,7 @@ class Branch(BaseModel):
     created_at: datetime
     description: Optional[str] = None
     mutations: list[dict[str, Any]] = Field(default_factory=list)
+    spawned_agents: list[dict[str, Any]] = Field(default_factory=list)
     forward_runs: list[dict[str, Any]] = Field(default_factory=list)
 
 

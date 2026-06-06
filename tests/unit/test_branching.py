@@ -74,6 +74,58 @@ async def test_run_forward_invokes_step_per_turn():
     assert {"turn 4 call", "turn 5 call", "turn 6 call"} <= {c.claim for c in snap.commitments}
 
 
+async def test_spawn_agent_registers_on_branch_graph():
+    mgr, beliefs, graphs = await _setup()
+    await mgr.branch_from(session_graph_id="race-1", turn=3, branch_id="early")
+
+    reg = await mgr.spawn_agent(
+        branch_id="early",
+        agent_id="rival_strat",
+        permission_scope=["tyres", "telemetry"],
+        role="rival strategist",
+    )
+    assert reg.session_graph_id == "early"
+    assert reg.permission_scope == ["tyres", "telemetry"]
+
+    # Registered on the branch's own session-graph record (not the parent's).
+    branch_graph = await graphs.get("early")
+    assert [a.agent_id for a in branch_graph.active_agents] == ["rival_strat"]
+    parent_graph = await graphs.get("race-1")
+    assert "rival_strat" not in {a.agent_id for a in parent_graph.active_agents}
+
+    # The counterfactual agent can then commit and drive the branch forward.
+    c = await mgr.mutate_belief(
+        branch_id="early", agent_id="rival_strat", new_claim="box now", topic="tyres"
+    )
+    assert c.agent_id == "rival_strat"
+
+
+async def test_spawn_agent_at_turn_and_duplicate_guard():
+    mgr, *_ = await _setup()
+    await mgr.branch_from(session_graph_id="race-1", turn=3, branch_id="early")
+
+    await mgr.spawn_agent(
+        branch_id="early", agent_id="db_specialist", permission_scope=["telemetry"], at_turn=15
+    )
+    # Duplicate agent_id is rejected.
+    import pytest
+
+    with pytest.raises(ValueError):
+        await mgr.spawn_agent(
+            branch_id="early", agent_id="db_specialist", permission_scope=["telemetry"]
+        )
+
+
+async def test_spawn_agent_unknown_branch_raises():
+    mgr, *_ = await _setup()
+    import pytest
+
+    with pytest.raises(KeyError):
+        await mgr.spawn_agent(
+            branch_id="nope", agent_id="x", permission_scope=["tyres"]
+        )
+
+
 async def test_diff_branches_shows_divergence():
     mgr, beliefs, _ = await _setup()
     await mgr.branch_from(session_graph_id="race-1", turn=3, branch_id="early")
