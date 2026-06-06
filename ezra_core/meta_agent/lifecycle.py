@@ -26,6 +26,7 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 from ezra_core.belief.store import BeliefStore
+from ezra_core.observability.tracer import EzraTracer
 from ezra_core.schemas.session_graph import SessionGraphState
 from ezra_core.session_graph import SessionGraphStore
 from ezra_core.tiers.warm import WarmTier
@@ -51,10 +52,13 @@ class LifecycleMetaAgent:
         *,
         belief_store: Optional[BeliefStore] = None,
         warm: Optional[WarmTier] = None,
+        tracer: Optional[EzraTracer] = None,
     ) -> None:
         self._store = store
         self._belief = belief_store
         self._warm = warm
+        # Owns the `meta.lifecycle` span for its scheduled pass.
+        self._tracer = tracer or EzraTracer.disabled()
 
     # -- state transitions ------------------------------------------------ #
     async def close_if_idle(
@@ -123,13 +127,23 @@ class LifecycleMetaAgent:
         self, session_graph_id: str, *, now: Optional[datetime] = None
     ) -> LifecycleReport:
         now = now or _utcnow()
-        report = LifecycleReport(session_graph_id=session_graph_id)
-        if await self.close_if_idle(session_graph_id, now=now):
-            report.transition = "closed"
-        elif await self.archive_if_stale(session_graph_id, now=now):
-            report.transition = "archived"
-        report.tombstoned_commitment_ids = await self.enforce_belief_retention(
-            session_graph_id, now=now
-        )
-        report.evicted_warm = await self.compact_warm(now=now)
-        return report
+        with self._tracer.span(
+            "meta.lifecycle", session_graph_id=session_graph_id
+        ) as span:
+            report = LifecycleReport(session_graph_id=session_graph_id)
+            if await self.close_if_idle(session_graph_id, now=now):
+                report.transition = "closed"
+            elif await self.archive_if_stale(session_graph_id, now=now):
+                report.transition = "archived"
+            report.tombstoned_commitment_ids = await self.enforce_belief_retention(
+                session_graph_id, now=now
+            )
+            report.evicted_warm = await self.compact_warm(now=now)
+            span.set_attributes(
+                {
+                    "meta.transition": report.transition or "none",
+                    "meta.tombstoned_count": len(report.tombstoned_commitment_ids),
+                    "meta.evicted_warm": report.evicted_warm,
+                }
+            )
+            return report

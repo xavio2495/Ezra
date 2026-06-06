@@ -32,6 +32,19 @@ async def _graph(store, **kwargs):
     return await SessionGraph.create(store=store, session_graph_id="race-1", **kwargs)
 
 
+async def test_tick_emits_meta_lifecycle_span():
+    from ezra_core.observability.tracer import EzraTracer
+
+    store = InMemorySessionGraphStore()
+    await _graph(store)  # no active agents -> tick will close it
+    tracer, exporter = EzraTracer.in_memory()
+    agent = LifecycleMetaAgent(store, tracer=tracer)
+
+    report = await agent.tick("race-1")
+    assert report.transition == "closed"
+    assert "meta.lifecycle" in {s.name for s in exporter.get_finished_spans()}
+
+
 async def test_close_if_idle_transitions_active_to_closed_when_empty():
     store = InMemorySessionGraphStore()
     graph = await _graph(store)

@@ -129,13 +129,16 @@ class Ezra:
         checker = default_checker(settings) if build_checker else None
 
         llm = llm_from_settings(settings)
+        tracer = tracer_from_settings(settings)
         learning = LearningMetaAgent(
             cold.semantic,
             llm=llm,
             promotion_access_count=settings.core_promotion_access_count,
+            tracer=tracer,
         )
-        lifecycle = LifecycleMetaAgent(graph_store, belief_store=cold.beliefs, warm=warm)
-        tracer = tracer_from_settings(settings)
+        lifecycle = LifecycleMetaAgent(
+            graph_store, belief_store=cold.beliefs, warm=warm, tracer=tracer
+        )
 
         from ezra_core.parse import parser_from_settings
 
@@ -275,8 +278,8 @@ class Ezra:
         """
         if self.lifecycle is None:
             return None
-        with self.tracer.span("meta.lifecycle", session_graph_id=session_graph_id):
-            return await self.lifecycle.tick(session_graph_id)
+        # The lifecycle agent owns its own `meta.lifecycle` span.
+        return await self.lifecycle.tick(session_graph_id)
 
     # -- lifecycle -------------------------------------------------------- #
     async def aclose(self) -> None:

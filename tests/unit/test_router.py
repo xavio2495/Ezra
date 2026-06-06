@@ -201,7 +201,7 @@ async def _learning_router(tracer=None):
     beliefs = InMemoryBeliefStore()
     semantic = InMemorySemanticStore()
     llm = _ExtractingLLM()
-    learning = LearningMetaAgent(semantic, llm=llm)
+    learning = LearningMetaAgent(semantic, llm=llm, tracer=tracer)
     router = Router(
         hot=hot, belief_store=beliefs, llm=llm, learning=learning, tracer=tracer
     )

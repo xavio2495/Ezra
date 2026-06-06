@@ -449,17 +449,18 @@ class Router:
         # durable facts, score/persist them, promote, update trust. Runs after the
         # response is produced (never blocks the model call). Skipped when no
         # learning agent is wired or no user_id is supplied to attribute facts to.
+        # The learning agent owns its own `meta.learning` span (so it's traced
+        # whoever calls it); the router just invokes the pass here.
         learning_report: Optional[LearningReport] = None
         if self._learning is not None and user_id:
-            with self._tracer.span("meta.learning", agent_id=agent_id):
-                learning_report = await self._learning.run_after_turn(
-                    user_id=user_id,
-                    scope_topics=scope,
-                    source_graph_ids=[graph_id],
-                    user_input=user_input,
-                    response=response,
-                    agent_id=agent_id,
-                )
+            learning_report = await self._learning.run_after_turn(
+                user_id=user_id,
+                scope_topics=scope,
+                source_graph_ids=[graph_id],
+                user_input=user_input,
+                response=response,
+                agent_id=agent_id,
+            )
 
         return TurnResult(
             agent_id=agent.agent_id,

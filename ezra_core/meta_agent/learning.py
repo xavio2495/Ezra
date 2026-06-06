@@ -22,12 +22,13 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from typing import Sequence
+from typing import Optional, Sequence
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
 from ezra_core.memory.semantic import SemanticStore
+from ezra_core.observability.tracer import EzraTracer
 from ezra_core.schemas.memory import SemanticFact
 from ezra_core.schemas.session_graph import AgentRegistration
 
@@ -67,12 +68,15 @@ class LearningMetaAgent:
         promotion_access_count: int = 3,
         write_confidence_threshold: float = 0.5,
         trust_damping: float = 0.2,
+        tracer: Optional[EzraTracer] = None,
     ) -> None:
         self._semantic = semantic_store
         self._llm = llm  # any object with async complete(messages) -> str; None disables extraction
         self._promotion_access_count = promotion_access_count
         self._write_threshold = write_confidence_threshold
         self._damping = trust_damping
+        # Owns the `meta.learning` span for its pass (traced regardless of caller).
+        self._tracer = tracer or EzraTracer.disabled()
 
     # -- 0. fact extraction (LLM) ---------------------------------------- #
     async def extract_facts(
@@ -200,26 +204,36 @@ class LearningMetaAgent:
         response: str = "",
         agent_id: str = "",
     ) -> LearningReport:
-        report = LearningReport()
-        candidates = list(fact_candidates)
-        # When no explicit candidates are handed in, extract them from the turn
-        # text via the LLM (no-op when no LLM is configured).
-        if not candidates and self._llm is not None and response:
-            candidates = await self.extract_facts(
+        with self._tracer.span(
+            "meta.learning", agent_id=agent_id, user_id=user_id
+        ) as span:
+            report = LearningReport()
+            candidates = list(fact_candidates)
+            # When no explicit candidates are handed in, extract them from the turn
+            # text via the LLM (no-op when no LLM is configured).
+            if not candidates and self._llm is not None and response:
+                candidates = await self.extract_facts(
+                    user_id=user_id,
+                    source_graph_id=source_graph_ids[0] if source_graph_ids else "",
+                    agent_id=agent_id,
+                    user_input=user_input,
+                    response=response,
+                    scope_topics=set(scope_topics),
+                )
+            report.persisted_fact_ids = await self.persist_writes(candidates)
+            report.promoted_fact_ids = await self.promote_eligible(
                 user_id=user_id,
-                source_graph_id=source_graph_ids[0] if source_graph_ids else "",
-                agent_id=agent_id,
-                user_input=user_input,
-                response=response,
-                scope_topics=set(scope_topics),
+                scope_topics=scope_topics,
+                source_graph_ids=source_graph_ids,
             )
-        report.persisted_fact_ids = await self.persist_writes(candidates)
-        report.promoted_fact_ids = await self.promote_eligible(
-            user_id=user_id,
-            scope_topics=scope_topics,
-            source_graph_ids=source_graph_ids,
-        )
-        for registration, topic, won in reconciliations:
-            updated = self.record_reconciliation(registration, topic, won=won)
-            report.trust_updates[f"{registration.agent_id}:{topic}"] = updated
-        return report
+            for registration, topic, won in reconciliations:
+                updated = self.record_reconciliation(registration, topic, won=won)
+                report.trust_updates[f"{registration.agent_id}:{topic}"] = updated
+            span.set_attributes(
+                {
+                    "meta.persisted_count": len(report.persisted_fact_ids),
+                    "meta.promoted_count": len(report.promoted_fact_ids),
+                    "meta.trust_update_count": len(report.trust_updates),
+                }
+            )
+            return report

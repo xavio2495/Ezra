@@ -33,6 +33,20 @@ def _agent():
     )
 
 
+async def test_run_after_turn_emits_meta_learning_span():
+    from ezra_core.observability.tracer import EzraTracer
+
+    tracer, exporter = EzraTracer.in_memory()
+    agent = LearningMetaAgent(InMemorySemanticStore(), tracer=tracer)
+    await agent.run_after_turn(
+        user_id="team",
+        scope_topics={"tyres"},
+        source_graph_ids=["race-1"],
+        fact_candidates=[_fact("a", confidence=0.9)],
+    )
+    assert "meta.learning" in {s.name for s in exporter.get_finished_spans()}
+
+
 def test_score_writes_drops_low_confidence():
     agent = LearningMetaAgent(InMemorySemanticStore(), write_confidence_threshold=0.5)
     kept = agent.score_writes([_fact("a", confidence=0.9), _fact("b", confidence=0.2)])
