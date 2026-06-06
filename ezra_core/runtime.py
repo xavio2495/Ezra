@@ -262,12 +262,14 @@ def gemini_checker(settings: EzraSettings) -> ContradictionChecker:
     similarity threshold is lowered: Gemini embeddings cluster paraphrases lower
     than MiniLM, so 0.85 would miss same-topic candidate pairs.
     """
-    from ezra_core.llm.adapter import GeminiEmbedder, GeminiNliClassifier
+    from ezra_core.llm.adapter import GeminiEmbedder, GeminiNliClassifier, is_vertex_model
 
-    key = settings.llm_api_key or None
+    # Vertex models authenticate via ADC (no key); AI Studio models use the key.
+    embed_key = None if is_vertex_model(settings.embedding_model) else (settings.llm_api_key or None)
+    nli_key = None if is_vertex_model(settings.meta_agent_model) else (settings.llm_api_key or None)
     return ContradictionChecker(
-        GeminiEmbedder(settings.embedding_model, api_key=key),
-        GeminiNliClassifier(settings.meta_agent_model, api_key=key),
+        GeminiEmbedder(settings.embedding_model, api_key=embed_key),
+        GeminiNliClassifier(settings.meta_agent_model, api_key=nli_key),
         similarity_threshold=settings.gemini_checker_similarity_threshold,
         nli_confidence_threshold=settings.nli_confidence_threshold,
     )

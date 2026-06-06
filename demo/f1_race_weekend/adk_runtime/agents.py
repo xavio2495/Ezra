@@ -37,7 +37,10 @@ def build_adk_agent(
 
     from google.adk.agents import Agent
 
-    if api_key and not os.environ.get("GOOGLE_API_KEY"):
+    # On Vertex (vertex_ai/ model), ADK/google-genai authenticates via ADC using the
+    # GOOGLE_GENAI_USE_VERTEXAI / GOOGLE_CLOUD_PROJECT / _LOCATION env (set on the
+    # GKE Job) — do NOT set an API key. Otherwise use the AI Studio key.
+    if not llm_model.startswith("vertex_ai/") and api_key and not os.environ.get("GOOGLE_API_KEY"):
         os.environ["GOOGLE_API_KEY"] = api_key
 
     turns = turns or TurnCounter()

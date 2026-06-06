@@ -133,5 +133,13 @@ class GeminiNliClassifier:
         return NliResult(label=label, confidence=confidence)
 
 
+def is_vertex_model(model: str) -> bool:
+    """litellm routes ``vertex_ai/...`` models through Vertex AI (keyless ADC),
+    not the AI Studio API key — used on GCP where AI Studio keys are blocked."""
+    return model.startswith("vertex_ai/")
+
+
 def llm_from_settings(settings: EzraSettings) -> LLMAdapter:
-    return LLMAdapter(settings.llm_model, api_key=settings.llm_api_key or None)
+    # Vertex uses ADC (Workload Identity on GKE), so no API key is passed.
+    api_key = None if is_vertex_model(settings.llm_model) else (settings.llm_api_key or None)
+    return LLMAdapter(settings.llm_model, api_key=api_key)
