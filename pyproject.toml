@@ -40,8 +40,11 @@ ingest = [
 ]
 # Google ADK — the agent runtime that consumes Ezra (real multi-agent demo).
 # Installed in the dev image + the GKE agents image; unit tests stub the runner.
+# google-cloud-aiplatform is required by litellm's vertex_ai/ route (e.g. the
+# Vertex Gemma model used by the live ADK smoke via ADK's LiteLlm wrapper).
 agents = [
     "google-adk>=2.0",
+    "google-cloud-aiplatform>=1.60",
 ]
 
 [tool.uv]

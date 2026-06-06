@@ -1,0 +1,65 @@
+# One-off live smoke for the deployed Ezra ADK service (NOT in kustomization):
+#   kubectl apply -f deploy/k8s/adk-smoke-job.yaml
+#   kubectl -n ezra logs -f job/ezra-adk-smoke
+#   kubectl -n ezra delete job ezra-adk-smoke   # before re-running
+#
+# Drives the deployed ezra-api (full surface → live Atlas) via RemoteEzraService:
+# Part 1 commit→rewind→revert (deterministic gate); Part 2 a real ADK Runner on a
+# no-token-cost Vertex Gemma model. Uses the agents image (google-adk + httpx).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ezra-adk-smoke
+  namespace: ezra
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  activeDeadlineSeconds: 600
+  template:
+    spec:
+      serviceAccountName: ezra-api
+      restartPolicy: Never
+      containers:
+        - name: ezra-adk-smoke
+          image: us-east1-docker.pkg.dev/ezra-498021/ezra/ezra-agents:latest
+          command: ["python", "-m", "demo.f1_race_weekend.adk_runtime.adk_smoke"]
+          envFrom:
+            - configMapRef:
+                name: ezra-config
+          env:
+            # The deployed Ezra service (in-cluster Service DNS, port 80).
+            - name: EZRA_API_URL
+              value: "http://ezra-api"
+            # Part 2: real ADK Runner on a low-cost zero-setup Vertex model
+            # (keyless WIF). Gemma on Vertex needs a self-deployed GPU endpoint
+            # (not free / 404s out-of-the-box), so the smoke uses Gemini Flash-Lite.
+            - name: EZRA_SMOKE_MODEL
+              value: "vertex_ai/gemini-2.5-flash-lite"
+            - name: GOOGLE_GENAI_USE_VERTEXAI
+              value: "true"
+            - name: GOOGLE_CLOUD_PROJECT
+              value: "ezra-498021"
+            - name: GOOGLE_CLOUD_LOCATION
+              value: "us-central1"
+            - name: VERTEXAI_PROJECT
+              value: "ezra-498021"
+            - name: VERTEXAI_LOCATION
+              value: "us-central1"
+          volumeMounts:
+            - name: secrets-store
+              mountPath: /mnt/secrets-store
+              readOnly: true
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1536Mi
+      volumes:
+        - name: secrets-store
+          csi:
+            driver: secrets-store-gke.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: ezra-secrets
