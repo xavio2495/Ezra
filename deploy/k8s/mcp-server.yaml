@@ -1,0 +1,50 @@
+# MongoDB MCP server (Streamable-HTTP) for the gap #3 protocol smoke. NOT in
+# kustomization — apply on demand:
+#   kubectl -n ezra create secret generic ezra-mcp-creds \
+#     --from-literal=MDB_MCP_API_CLIENT_ID=... --from-literal=MDB_MCP_API_CLIENT_SECRET=...
+#   kubectl apply -f deploy/k8s/mcp-server.yaml
+#
+# Read-only (--readOnly): the atlas-streams-discover (list-workspaces) tool used by
+# the smoke is read-only; writes/teardown are blocked. Atlas tools authenticate via
+# the Service-Account client id/secret (MDB_MCP_API_CLIENT_*).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ezra-mcp
+  namespace: ezra
+  labels: { app: ezra-mcp }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: ezra-mcp }
+  template:
+    metadata:
+      labels: { app: ezra-mcp }
+    spec:
+      containers:
+        - name: mcp
+          image: mongodb/mongodb-mcp-server:latest
+          args:
+            - "--transport=http"
+            - "--httpHost=0.0.0.0"
+            - "--httpPort=3000"
+            - "--readOnly"
+          envFrom:
+            - secretRef:
+                name: ezra-mcp-creds
+          ports:
+            - containerPort: 3000
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: "1", memory: 512Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ezra-mcp
+  namespace: ezra
+spec:
+  selector: { app: ezra-mcp }
+  ports:
+    - port: 3000
+      targetPort: 3000

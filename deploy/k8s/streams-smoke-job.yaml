@@ -1,0 +1,34 @@
+# One-off live smoke for spec-gap #3 (protocol). NOT in kustomization. Needs the
+# MCP server (deploy/k8s/mcp-server.yaml) running. Run:
+#   kubectl apply -f deploy/k8s/streams-smoke-job.yaml
+#   kubectl -n ezra logs -f job/ezra-streams-smoke
+#   kubectl -n ezra delete job ezra-streams-smoke   # before re-running
+#
+# Talks only to the in-cluster MCP service (no Atlas-direct, no secrets needed in
+# this pod — the MCP server holds the Atlas creds).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ezra-streams-smoke
+  namespace: ezra
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  activeDeadlineSeconds: 300
+  template:
+    spec:
+      serviceAccountName: ezra-api
+      restartPolicy: Never
+      containers:
+        - name: ezra-streams-smoke
+          image: us-east1-docker.pkg.dev/ezra-498021/ezra/ezra-agents:latest
+          command: ["python", "-m", "demo.f1_race_weekend.adk_runtime.streams_smoke"]
+          env:
+            - name: EZRA_MONGODB_MCP_URL
+              value: "http://ezra-mcp:3000"
+            # atlas-streams tools are project-scoped (confirmed live).
+            - name: EZRA_MONGODB_ATLAS_PROJECT_ID
+              value: "6a1d041c95f9c46782a7bf07"
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: "500m", memory: 512Mi }

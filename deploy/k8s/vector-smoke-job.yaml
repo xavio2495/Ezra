@@ -1,0 +1,62 @@
+# One-off live smoke for spec-gap #2 (archival vector recall via Atlas Vector
+# Search). NOT in kustomization. Run:
+#   kubectl apply -f deploy/k8s/vector-smoke-job.yaml
+#   kubectl -n ezra logs -f job/ezra-vector-smoke
+#   kubectl -n ezra delete job ezra-vector-smoke   # before re-running
+#
+# Talks directly to live Atlas (Mongo URI from the Secret Manager CSI mount);
+# embeds via Vertex (keyless WIF). Uses the agents image (carries the deps + the
+# vector_smoke module).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ezra-vector-smoke
+  namespace: ezra
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  activeDeadlineSeconds: 600
+  template:
+    spec:
+      serviceAccountName: ezra-api
+      restartPolicy: Never
+      containers:
+        - name: ezra-vector-smoke
+          image: us-east1-docker.pkg.dev/ezra-498021/ezra/ezra-agents:latest
+          command: ["python", "-m", "demo.f1_race_weekend.adk_runtime.vector_smoke"]
+          envFrom:
+            - configMapRef:
+                name: ezra-config
+          env:
+            # Vertex embeddings (keyless WIF) — text-embedding-005 = 768-dim; the
+            # smoke probes the real dim and sizes the index to it.
+            - name: EZRA_EMBEDDING_MODEL
+              value: "vertex_ai/text-embedding-005"
+            - name: GOOGLE_GENAI_USE_VERTEXAI
+              value: "true"
+            - name: GOOGLE_CLOUD_PROJECT
+              value: "ezra-498021"
+            - name: GOOGLE_CLOUD_LOCATION
+              value: "us-central1"
+            - name: VERTEXAI_PROJECT
+              value: "ezra-498021"
+            - name: VERTEXAI_LOCATION
+              value: "us-central1"
+          volumeMounts:
+            - name: secrets-store
+              mountPath: /mnt/secrets-store
+              readOnly: true
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1536Mi
+      volumes:
+        - name: secrets-store
+          csi:
+            driver: secrets-store-gke.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: ezra-secrets

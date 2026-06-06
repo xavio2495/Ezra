@@ -79,6 +79,7 @@ class AtlasStreamsConnector(BaseConnector):
         *,
         workspace: str,
         processor: str,
+        project_id: Optional[str] = None,
         source_name: Optional[str] = None,
         topics: Optional[list[str]] = None,
         limit: int = 50,
@@ -86,12 +87,19 @@ class AtlasStreamsConnector(BaseConnector):
         self._invoker = invoker
         self._workspace = workspace
         self._processor = processor
+        # The atlas-streams-* MCP tools are project-scoped — every call needs the
+        # Atlas project (group) id, confirmed live (the server rejects calls without
+        # it). None omits it (e.g. when a fake invoker doesn't need it).
+        self._project_id = project_id
         self._source = source_name or processor
         self._topics = topics or []
         self._limit = limit
 
     def _target(self, **extra: Any) -> dict:
-        return {"workspace": self._workspace, "name": self._processor, **extra}
+        target = {"workspace": self._workspace, "name": self._processor, **extra}
+        if self._project_id:
+            target["projectId"] = self._project_id
+        return target
 
     async def fetch(
         self,
@@ -140,40 +148,144 @@ class AtlasStreamsConnector(BaseConnector):
             "atlas-streams-teardown", self._target(resource="processor")
         )
 
+    async def list_workspaces(self) -> Any:
+        """Project-scoped discovery (``atlas-streams-discover list-workspaces``) —
+        read-only, needs no workspace/processor (but is project-scoped). Useful to
+        confirm connectivity to the MCP server before a processor exists."""
+        args: dict = {"action": "list-workspaces"}
+        if self._project_id:
+            args["projectId"] = self._project_id
+        return await self._invoker.call("atlas-streams-discover", args)
+
+
+_DEFAULT_PROTOCOL_VERSION = "2025-06-18"
+
+
+def _parse_jsonrpc(content_type: str, text: str) -> dict:
+    """Parse an MCP Streamable-HTTP response body. The server may reply with a
+    plain JSON object or a Server-Sent-Events stream (`event: message` / `data:
+    {jsonrpc...}`); for SSE we concatenate the ``data:`` payloads and JSON-decode.
+    """
+    if "text/event-stream" in (content_type or ""):
+        data_lines = [
+            line[len("data:") :].strip()
+            for line in text.splitlines()
+            if line.strip().startswith("data:")
+        ]
+        text = "".join(data_lines)
+    text = text.strip()
+    return json.loads(text) if text else {}
+
 
 class McpHttpInvoker:
-    """Minimal MongoDB-MCP Streamable-HTTP client: one JSON-RPC ``tools/call``.
+    """MongoDB-MCP Streamable-HTTP client (real wiring for
+    :class:`AtlasStreamsConnector`).
 
-    Real wiring for :class:`AtlasStreamsConnector`. Lazy (imports httpx on call)
-    and **live-only** — unit tests inject a fake invoker instead. Best-effort: a
-    transport/JSON-RPC error raises so the caller (router fetch) can treat it like
-    any other connector failure.
+    Speaks the MCP Streamable-HTTP lifecycle: on the first call it performs the
+    ``initialize`` handshake (capturing the server's ``Mcp-Session-Id`` and the
+    negotiated protocol version), sends the ``notifications/initialized`` ack, then
+    issues ``tools/call`` with the session header. A spec-compliant server rejects
+    a bare ``tools/call`` without this, so the handshake is mandatory. Responses
+    come back as JSON *or* SSE — both are handled.
+
+    Lazy (imports httpx on first call) and best-effort: a transport / JSON-RPC
+    error raises so the caller (router fetch) treats it like any connector failure.
+    Unit tests inject a fake invoker; this class is exercised live + via an httpx
+    ``MockTransport`` test.
     """
 
     def __init__(
-        self, url: str, *, headers: Optional[dict] = None, timeout: float = 30.0
+        self,
+        url: str,
+        *,
+        headers: Optional[dict] = None,
+        timeout: float = 30.0,
+        protocol_version: str = _DEFAULT_PROTOCOL_VERSION,
     ) -> None:
         self._url = url
         self._headers = headers or {}
         self._timeout = timeout
+        self._protocol_version = protocol_version
+        self._session_id: Optional[str] = None
+        self._initialized = False
+        self._rpc_id = 0
+
+    def _next_id(self) -> int:
+        self._rpc_id += 1
+        return self._rpc_id
+
+    async def _post(self, client, payload: dict, *, with_protocol_header: bool, expect_body: bool):
+        headers = {
+            "Accept": "application/json, text/event-stream",
+            "Content-Type": "application/json",
+            **self._headers,
+        }
+        if with_protocol_header:
+            headers["MCP-Protocol-Version"] = self._protocol_version
+        if self._session_id:
+            headers["Mcp-Session-Id"] = self._session_id
+        resp = await client.post(self._url, json=payload, headers=headers)
+        # The server assigns the session on the initialize response (header).
+        sid = resp.headers.get("mcp-session-id")
+        if sid:
+            self._session_id = sid
+        resp.raise_for_status()
+        if not expect_body:
+            return None
+        data = _parse_jsonrpc(resp.headers.get("content-type", ""), resp.text)
+        if isinstance(data, dict) and data.get("error"):
+            raise RuntimeError(f"MCP error: {data['error']}")
+        return data
+
+    async def _ensure_session(self, client) -> None:
+        if self._initialized:
+            return
+        init = await self._post(
+            client,
+            {
+                "jsonrpc": "2.0",
+                "id": self._next_id(),
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": self._protocol_version,
+                    "capabilities": {},
+                    "clientInfo": {"name": "ezra-atlas-streams", "version": "0.1"},
+                },
+            },
+            with_protocol_header=False,  # negotiated on the response, not sent here
+            expect_body=True,
+        )
+        negotiated = (init or {}).get("result", {}).get("protocolVersion")
+        if negotiated:
+            self._protocol_version = negotiated
+        # Ack — a notification (no id); server returns 202 with no body.
+        await self._post(
+            client,
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+            with_protocol_header=True,
+            expect_body=False,
+        )
+        self._initialized = True
 
     async def call(self, tool: str, arguments: dict) -> Any:
         import httpx
 
-        body = {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/call",
-            "params": {"name": tool, "arguments": arguments},
-        }
-        headers = {"Accept": "application/json, text/event-stream", **self._headers}
         async with httpx.AsyncClient(timeout=self._timeout) as client:
-            resp = await client.post(self._url, json=body, headers=headers)
-            resp.raise_for_status()
-            data = resp.json()
-        if "error" in data:
-            raise RuntimeError(f"MCP tool {tool} failed: {data['error']}")
-        return data.get("result", data)
+            await self._ensure_session(client)
+            data = await self._post(
+                client,
+                {
+                    "jsonrpc": "2.0",
+                    "id": self._next_id(),
+                    "method": "tools/call",
+                    "params": {"name": tool, "arguments": arguments},
+                },
+                with_protocol_header=True,
+                expect_body=True,
+            )
+        if isinstance(data, dict) and "result" in data:
+            return data["result"]
+        return data
 
 
 def atlas_streams_connector_from_settings(
@@ -181,6 +293,7 @@ def atlas_streams_connector_from_settings(
     *,
     workspace: Optional[str] = None,
     processor: Optional[str] = None,
+    project_id: Optional[str] = None,
     topics: Optional[list[str]] = None,
     limit: int = 50,
     invoker: Optional[StreamToolInvoker] = None,
@@ -191,6 +304,7 @@ def atlas_streams_connector_from_settings(
         invoker or McpHttpInvoker(settings.mongodb_mcp_url),
         workspace=workspace or settings.atlas_streams_workspace,
         processor=processor or settings.atlas_streams_processor,
+        project_id=project_id or (settings.mongodb_atlas_project_id or None),
         topics=topics,
         limit=limit,
     )
