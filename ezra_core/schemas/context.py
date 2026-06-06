@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 class ContextSlotType(str, Enum):
     SYSTEM = "system"
     PINNED_BELIEF = "pinned_belief"
+    ARCHIVAL_FACT = "archival_fact"
     WARM_SUMMARY = "warm_summary"
     HOT_TURN = "hot_turn"
     MESH_RESULT = "mesh_result"

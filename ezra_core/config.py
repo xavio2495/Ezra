@@ -57,6 +57,10 @@ class EzraSettings(BaseSettings):
     hot_max_turns: int = 8
     salience_decay_rate: float = 0.1
     warm_ttl_hours: int = 24
+    # Per-turn archival semantic recall (step 4): how many similarity-ranked
+    # archival facts to pull, and the Atlas Vector Search index over their embeddings.
+    archival_recall_limit: int = 3
+    semantic_vector_index: str = "semantic_archival_vector"
 
     # Contradiction detection (two-pass) + reconciler
     nli_model: str = "cross-encoder/nli-deberta-v3-base"

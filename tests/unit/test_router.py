@@ -118,6 +118,56 @@ async def test_run_turn_with_warm_recall():
     assert "tyre deg trending high" in warm_text
 
 
+async def test_run_turn_recalls_archival_facts_by_similarity():
+    from ezra_core.memory.semantic import InMemorySemanticStore
+    from ezra_core.schemas.memory import SemanticFact
+
+    semantic = InMemorySemanticStore(FakeEmbedder())
+    now = datetime.now(timezone.utc)
+
+    def _f(fid, subject, topics):
+        return SemanticFact(
+            id=fid, user_id="u1", subject=subject, predicate="trends", object="high",
+            tier="archival", topics=topics, confidence=0.9,
+            source_session_graph_ids=["race-1"], created_at=now, updated_at=now,
+        )
+
+    await semantic.add(_f("tyre", "tyre wear", ["tyres"]))
+    await semantic.add(_f("fuel", "fuel burn", ["fuel"]))  # out of scope
+
+    router, *_ = await _router(semantic=semantic)
+    result = await router.run_turn(
+        agent=_agent(["tyres"]), user_input="tyre outlook?", user_id="u1"
+    )
+
+    archival_text = " ".join(
+        s.content for s in result.context.slots
+        if s.slot_type == ContextSlotType.ARCHIVAL_FACT
+    )
+    assert "tyre wear" in archival_text
+    assert "fuel burn" not in archival_text  # scope-filtered out
+    # Recall bumped the surfaced fact's access count (drives archival→core promotion).
+    assert (await semantic.get("tyre")).access_count == 1
+
+
+async def test_run_turn_archival_recall_skipped_without_user_id():
+    from ezra_core.memory.semantic import InMemorySemanticStore
+    from ezra_core.schemas.memory import SemanticFact
+
+    semantic = InMemorySemanticStore(FakeEmbedder())
+    now = datetime.now(timezone.utc)
+    await semantic.add(SemanticFact(
+        id="t", user_id="u1", subject="tyre wear", predicate="p", object="o",
+        tier="archival", topics=["tyres"], confidence=0.9,
+        source_session_graph_ids=["race-1"], created_at=now, updated_at=now,
+    ))
+    router, *_ = await _router(semantic=semantic)
+    result = await router.run_turn(agent=_agent(["tyres"]), user_input="tyre outlook?")
+    assert not any(
+        s.slot_type == ContextSlotType.ARCHIVAL_FACT for s in result.context.slots
+    )
+
+
 async def test_run_turn_emits_router_step_spans():
     from ezra_core.observability.tracer import EzraTracer
 

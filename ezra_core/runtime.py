@@ -107,7 +107,11 @@ class Ezra:
 
         # Allow this runtime's egress IP on Atlas before connecting (no-op locally).
         ensure_egress_allowed(settings)
-        cold = cold_tier_from_settings(settings)
+        # One embedder shared by the warm tier and the archival-recall semantic store.
+        embedder = GeminiEmbedder(
+            settings.embedding_model, api_key=settings.llm_api_key or None
+        )
+        cold = cold_tier_from_settings(settings, embedder=embedder)
         client: AsyncMongoClient = cold.client
         graph_store = MongoSessionGraphStore(client, settings.mongodb_db)
         branch_store = MongoBranchStore(client, settings.mongodb_db)
@@ -120,11 +124,7 @@ class Ezra:
         hot = hot_tier_from_settings(settings)
 
         qdrant = AsyncQdrantClient(url=settings.qdrant_url)
-        warm = WarmTier(
-            qdrant,
-            GeminiEmbedder(settings.embedding_model, api_key=settings.llm_api_key or None),
-            ttl_hours=settings.warm_ttl_hours,
-        )
+        warm = WarmTier(qdrant, embedder, ttl_hours=settings.warm_ttl_hours)
 
         checker = default_checker(settings) if build_checker else None
 
@@ -208,10 +208,12 @@ class Ezra:
             belief_store=self.belief_store,
             llm=self.llm,
             warm=self.warm,
+            semantic=self.semantic_store,
             policy=self.policy,
             mesh=mesh,
             context_limit=self.settings.context_limit,
             salience_decay_rate=self.settings.salience_decay_rate,
+            archival_limit=self.settings.archival_recall_limit,
             tracer=self.tracer,
             learning=self.learning,
             parser=self.parser,

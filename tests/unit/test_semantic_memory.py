@@ -4,6 +4,13 @@ from ezra_core.memory.semantic import InMemorySemanticStore
 from ezra_core.schemas.memory import SemanticFact
 
 
+class FakeEmbedder:
+    """Clusters onto two axes by keyword (deterministic)."""
+
+    def encode(self, text):
+        return [1.0, 0.0] if "tyre" in text.lower() else [0.0, 1.0]
+
+
 def _fact(
     fid: str,
     *,
@@ -11,14 +18,17 @@ def _fact(
     topics: list[str] | None = None,
     graphs: list[str] | None = None,
     user: str = "u1",
+    subject: str = "s",
+    predicate: str = "p",
+    object: str = "o",
 ) -> SemanticFact:
     now = datetime.now(timezone.utc)
     return SemanticFact(
         id=fid,
         user_id=user,
-        subject="s",
-        predicate="p",
-        object="o",
+        subject=subject,
+        predicate=predicate,
+        object=object,
         tier=tier,
         topics=topics if topics is not None else ["tyres"],
         confidence=1.0,
@@ -76,3 +86,42 @@ async def test_user_isolation():
         user_id="u1", scope_topics={"tyres"}, source_graph_ids=["gA"]
     )
     assert {f.id for f in core} == {"mine"}
+
+
+async def test_add_embeds_fact_when_embedder_present():
+    store = InMemorySemanticStore(FakeEmbedder())
+    await store.add(_fact("f", subject="tyre", predicate="wear", object="high"))
+    stored = await store.get("f")
+    assert stored.embedding == [1.0, 0.0]
+
+
+async def test_recall_archival_ranks_by_similarity_and_scope():
+    store = InMemorySemanticStore(FakeEmbedder())
+    await store.add(_fact("tyre-fact", tier="archival", topics=["tyres"], subject="tyre"))
+    await store.add(_fact("fuel-fact", tier="archival", topics=["fuel"], subject="fuel"))
+    # core fact is excluded; only archival is recalled
+    await store.add(_fact("tyre-core", tier="core", topics=["tyres"], subject="tyre"))
+
+    hits = await store.recall_archival(
+        "tyre degradation question", user_id="u1", scope_topics={"tyres"}, limit=5
+    )
+    assert [f.id for f in hits] == ["tyre-fact"]  # fuel out of scope, core excluded
+
+
+async def test_recall_archival_user_isolation():
+    store = InMemorySemanticStore(FakeEmbedder())
+    await store.add(_fact("mine", tier="archival", user="u1", subject="tyre"))
+    await store.add(_fact("theirs", tier="archival", user="u2", subject="tyre"))
+    hits = await store.recall_archival(
+        "tyre", user_id="u1", scope_topics={"tyres"}, limit=5
+    )
+    assert {f.id for f in hits} == {"mine"}
+
+
+async def test_recall_archival_without_embedder_returns_empty():
+    store = InMemorySemanticStore()  # no embedder
+    await store.add(_fact("f", tier="archival", subject="tyre"))
+    hits = await store.recall_archival(
+        "tyre", user_id="u1", scope_topics={"tyres"}, limit=5
+    )
+    assert hits == []

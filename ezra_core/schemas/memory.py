@@ -30,6 +30,10 @@ class SemanticFact(BaseModel):
     topics: list[str] = Field(default_factory=list)
     access_count: int = 0
     confidence: float = Field(ge=0, le=1)
+    # Vector embedding of "subject predicate object" — set on add when the store
+    # has an embedder; powers per-turn archival recall by similarity (Atlas
+    # ``$vectorSearch`` / in-memory cosine).
+    embedding: Optional[list[float]] = None
     # which graphs first surfaced this fact (cross-graph inheritance tracking)
     source_session_graph_ids: list[str] = Field(default_factory=list)
     created_at: datetime

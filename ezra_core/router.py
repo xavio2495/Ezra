@@ -264,11 +264,13 @@ class Router:
         belief_store: BeliefStore,
         llm,
         warm: Optional[WarmTier] = None,
+        semantic: Optional[SemanticStore] = None,
         policy: Optional[PolicyEngine] = None,
         mesh: Optional[BaseConnector] = None,
         context_limit: int = 128000,
         salience_decay_rate: float = 0.1,
         warm_limit: int = 5,
+        archival_limit: int = 3,
         tracer: Optional[EzraTracer] = None,
         learning: Optional[LearningMetaAgent] = None,
         parser: Optional["IntentParser"] = None,
@@ -277,11 +279,15 @@ class Router:
         self._belief = belief_store
         self._llm = llm
         self._warm = warm
+        # Step 4 also pulls archival semantic facts by vector similarity to the
+        # current input (scope-filtered); None disables it.
+        self._semantic = semantic
         self._policy = policy or PolicyEngine(enabled=False)
         self._mesh = mesh
         self._context_limit = context_limit
         self._decay = salience_decay_rate
         self._warm_limit = warm_limit
+        self._archival_limit = archival_limit
         self._tracer = tracer or EzraTracer.disabled()
         self._learning = learning
         # Step 1 (Parse): when set, the router infers whether a turn needs a live
@@ -297,11 +303,12 @@ class Router:
         mesh_query: Optional[str] = None,
         mesh_topics: Sequence[str] = (),
         as_of: Optional[datetime] = None,
+        user_id: str = "",
     ) -> AssembledContext:
         """Assemble the exact context this agent would see for ``user_input`` —
         steps 3/4/5/6 — without calling the model or writing back. Useful for
         inspecting what an agent is about to be handed (the same shape ``replay``
-        reconstructs)."""
+        reconstructs). ``user_id`` enables per-turn archival semantic recall."""
         return (
             await self._assemble_turn(
                 agent=agent,
@@ -310,6 +317,7 @@ class Router:
                 mesh_query=mesh_query,
                 mesh_topics=mesh_topics,
                 as_of=as_of,
+                user_id=user_id,
             )
         ).context
 
@@ -322,6 +330,7 @@ class Router:
         mesh_query: Optional[str],
         mesh_topics: Sequence[str],
         as_of: Optional[datetime],
+        user_id: str = "",
     ) -> "_AssembledTurn":
         scope = set(agent.permission_scope)
         graph_id = agent.session_graph_id
@@ -364,8 +373,12 @@ class Router:
         with self._tracer.span(RouterStep.BELIEF_CHECK, agent_id=agent_id):
             belief_snap = await snapshot_now(self._belief, graph_id, scope_topics=scope)
 
-        # Step 4 (Hydrate) — warm recall + recent hot turns.
+        # Step 4 (Hydrate) — archival semantic recall by similarity + warm recall
+        # + recent hot turns.
         with self._tracer.span(RouterStep.HYDRATE, agent_id=agent_id):
+            archival_facts = await self._recall_archival(
+                user_input=user_input, user_id=user_id, scope=scope
+            )
             warm_summaries = []
             if self._warm is not None:
                 warm_summaries = await self._warm.recall(
@@ -382,6 +395,7 @@ class Router:
                 agent=agent,
                 system_prompt=system_prompt,
                 beliefs=belief_snap.commitments,
+                archival_facts=archival_facts,
                 warm_summaries=warm_summaries,
                 hot_turns=hot_turns,
                 mesh_result=mesh_result,
@@ -416,6 +430,7 @@ class Router:
             mesh_query=mesh_query,
             mesh_topics=mesh_topics,
             as_of=as_of,
+            user_id=user_id,
         )
         context = assembled.context
         mesh_result = assembled.mesh_result
@@ -456,12 +471,36 @@ class Router:
             parsed_intent=assembled.parsed_intent,
         )
 
+    async def _recall_archival(
+        self, *, user_input: str, user_id: str, scope: set[str]
+    ) -> list[SemanticFact]:
+        """Step 4 archival recall: the user's most input-similar archival facts,
+        scope-filtered. Best-effort — a missing Atlas vector index (or no store /
+        no user_id) yields nothing rather than failing the turn. Recall bumps each
+        fact's access count, which drives the learning agent's archival→core
+        promotion."""
+        if self._semantic is None or not user_id:
+            return []
+        try:
+            facts = await self._semantic.recall_archival(
+                user_input,
+                user_id=user_id,
+                scope_topics=scope,
+                limit=self._archival_limit,
+            )
+            for fact in facts:
+                await self._semantic.increment_access(fact.id)
+            return facts
+        except Exception:
+            return []
+
     def _assemble(
         self,
         *,
         agent: AgentRegistration,
         system_prompt: str,
         beliefs: list[Commitment],
+        archival_facts: list[SemanticFact],
         warm_summaries: list,
         hot_turns: list[dict[str, Any]],
         mesh_result: Optional[MeshResult],
@@ -484,6 +523,19 @@ class Router:
                     salience=1.0,
                     token_cost=_estimate_tokens(c.claim),
                     topics=[c.topic],
+                )
+            )
+        for f in archival_facts:
+            text = f"{f.subject} {f.predicate} {f.object}"
+            candidates.append(
+                ContextSlot(
+                    slot_type=ContextSlotType.ARCHIVAL_FACT,
+                    content=text,
+                    salience=compute_salience(
+                        ContextSlotType.ARCHIVAL_FACT, 0, f.confidence, decay_rate=self._decay
+                    ),
+                    token_cost=_estimate_tokens(text),
+                    topics=f.topics,
                 )
             )
         for s in warm_summaries:

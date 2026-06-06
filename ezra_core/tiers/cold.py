@@ -9,10 +9,12 @@ is the production wiring against a real cluster.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Optional
 
 from pymongo import AsyncMongoClient
 from pymongo.server_api import ServerApi
 
+from ezra_core.belief.checker import Embedder
 from ezra_core.belief.store import MongoBeliefStore
 from ezra_core.config import EzraSettings
 from ezra_core.memory.episodic import MongoEpisodicStore
@@ -39,7 +41,9 @@ class ColdTier:
         await self.client.close()
 
 
-def cold_tier_from_settings(settings: EzraSettings) -> ColdTier:
+def cold_tier_from_settings(
+    settings: EzraSettings, *, embedder: Optional[Embedder] = None
+) -> ColdTier:
     if not settings.mongodb_uri:
         raise ValueError("EZRA_MONGODB_URI is not set")
     client = cold_client(settings.mongodb_uri)
@@ -47,7 +51,9 @@ def cold_tier_from_settings(settings: EzraSettings) -> ColdTier:
     return ColdTier(
         client=client,
         beliefs=MongoBeliefStore(client, db),
-        semantic=MongoSemanticStore(client, db),
+        semantic=MongoSemanticStore(
+            client, db, embedder=embedder, vector_index=settings.semantic_vector_index
+        ),
         episodic=MongoEpisodicStore(client, db),
         procedural=MongoProceduralStore(client, db),
     )
