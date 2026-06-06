@@ -104,6 +104,95 @@ async def test_branch_then_diff(client):
     assert d.json()["branch_id"] == "wi"
 
 
+async def test_context_assemble_returns_scope_filtered_context():
+    from fakeredis import aioredis
+
+    from ezra_core.router import Router
+    from ezra_core.tiers.hot import HotTier
+
+    beliefs = InMemoryBeliefStore()
+    await beliefs.append(_commit("start softs", "tyres"))
+    await beliefs.append(_commit("fuel tight", "fuel"))
+    router = Router(
+        hot=HotTier(aioredis.FakeRedis(decode_responses=True)),
+        belief_store=beliefs,
+        llm=None,  # assemble never calls the model
+    )
+    app = create_app(belief_store=beliefs, router=router, bearer_token=TOKEN)
+    async with _client(app) as c:
+        r = await c.post(
+            "/ezra/context/assemble",
+            headers=AUTH,
+            json={
+                "session_graph_id": "race-1",
+                "agent_id": "strategist",
+                "scope": ["tyres"],
+                "user_input": "what's the plan?",
+                "system_prompt": "You strategise.",
+            },
+        )
+    assert r.status_code == 200
+    contents = " ".join(s["content"] for s in r.json()["slots"])
+    assert "start softs" in contents
+    assert "fuel tight" not in contents  # out-of-scope belief filtered out
+
+
+async def test_context_assemble_400_without_router(client):
+    r = await client.post(
+        "/ezra/context/assemble",
+        headers=AUTH,
+        json={"session_graph_id": "race-1", "agent_id": "a", "user_input": "hi"},
+    )
+    assert r.status_code == 400
+
+
+async def test_run_forward_501_without_step(client):
+    await client.post(
+        "/ezra/branch",
+        headers=AUTH,
+        json={"session_graph_id": "race-1", "turn": 5, "branch_id": "wi"},
+    )
+    r = await client.post(
+        "/ezra/branch/run-forward",
+        headers=AUTH,
+        json={"branch_id": "wi", "until_turn": 7},
+    )
+    assert r.status_code == 501
+
+
+async def test_run_forward_with_step_executes_turns():
+    beliefs = InMemoryBeliefStore()
+    await beliefs.append(_commit("start softs", "tyres"))
+    mgr = BranchManager(
+        graph_store=InMemorySessionGraphStore(),
+        belief_store=beliefs,
+        branch_store=InMemoryBranchStore(),
+    )
+    calls: list = []
+
+    async def step(*, branch_id, turn):
+        calls.append((branch_id, turn))
+        return "ran"
+
+    app = create_app(
+        belief_store=beliefs, branch_manager=mgr, forward_step=step, bearer_token=TOKEN
+    )
+    async with _client(app) as c:
+        await c.post(
+            "/ezra/branch",
+            headers=AUTH,
+            json={"session_graph_id": "race-1", "turn": 5, "branch_id": "wi"},
+        )
+        r = await c.post(
+            "/ezra/branch/run-forward",
+            headers=AUTH,
+            json={"branch_id": "wi", "until_turn": 7},
+        )
+    assert r.status_code == 200
+    assert r.json()["steps"] == 2  # turns 6 and 7
+    assert calls == [("wi", 6), ("wi", 7)]
+
+
 async def test_mesh_query_policy_denied():
     app = create_app(
         belief_store=InMemoryBeliefStore(),

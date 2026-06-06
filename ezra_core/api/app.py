@@ -7,20 +7,24 @@ testable with ``fastapi.testclient.TestClient`` and no live infra.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel
 
-from ezra_core.belief.branching import BranchManager
+from ezra_core.belief.branching import BranchManager, ForwardStep
 from ezra_core.belief.checker import ContradictionChecker
 from ezra_core.belief.replay import reconstruct_state_at_turn, snapshot_now
 from ezra_core.belief.store import BeliefStore
 from ezra_core.mesh.base import BaseConnector
 from ezra_core.policy.engine import PolicyDeniedError, PolicyEngine
+from ezra_core.router import Router
 from ezra_core.schemas.belief import BeliefSnapshot, Contradiction
 from ezra_core.schemas.branch import Branch, BranchDiff
+from ezra_core.schemas.context import AssembledContext
 from ezra_core.schemas.mesh import MeshResult
+from ezra_core.schemas.session_graph import AgentRegistration
 
 
 class SnapshotRequest(BaseModel):
@@ -63,6 +67,21 @@ class BranchDiffRequest(BaseModel):
     from_turn: int
 
 
+class AssembleRequest(BaseModel):
+    session_graph_id: str
+    agent_id: str
+    scope: list[str] = []
+    user_input: str
+    system_prompt: str = ""
+    mesh_query: Optional[str] = None
+    mesh_topics: list[str] = []
+
+
+class RunForwardRequest(BaseModel):
+    branch_id: str
+    until_turn: int
+
+
 def create_app(
     *,
     belief_store: BeliefStore,
@@ -70,6 +89,8 @@ def create_app(
     branch_manager: Optional[BranchManager] = None,
     mesh: Optional[BaseConnector] = None,
     policy: Optional[PolicyEngine] = None,
+    router: Optional[Router] = None,
+    forward_step: Optional[ForwardStep] = None,
     bearer_token: Optional[str] = None,
 ) -> FastAPI:
     app = FastAPI(title="Ezra", version="0.1.0")
@@ -88,7 +109,29 @@ def create_app(
             "checker": checker is not None,
             "mesh": mesh is not None,
             "branching": branch_manager is not None,
+            "router": router is not None,
         }
+
+    @app.post("/ezra/context/assemble", dependencies=guarded)
+    async def context_assemble(req: AssembleRequest) -> AssembledContext:
+        if router is None:
+            raise HTTPException(status_code=400, detail="no router configured")
+        agent = AgentRegistration(
+            agent_id=req.agent_id,
+            session_graph_id=req.session_graph_id,
+            permission_scope=req.scope,
+            spawned_at=datetime.now(timezone.utc),
+        )
+        try:
+            return await router.assemble_context(
+                agent=agent,
+                user_input=req.user_input,
+                system_prompt=req.system_prompt,
+                mesh_query=req.mesh_query,
+                mesh_topics=req.mesh_topics,
+            )
+        except PolicyDeniedError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
 
     @app.post("/ezra/belief/snapshot", dependencies=guarded)
     async def belief_snapshot(req: SnapshotRequest) -> BeliefSnapshot:
@@ -144,5 +187,26 @@ def create_app(
         return await branch_manager.diff_branches(
             original=req.original, branch=req.branch, from_turn=req.from_turn
         )
+
+    @app.post("/ezra/branch/run-forward", dependencies=guarded)
+    async def branch_run_forward(req: RunForwardRequest) -> dict:
+        if branch_manager is None:
+            raise HTTPException(status_code=400, detail="branching not configured")
+        if forward_step is None:
+            # Running a branch forward re-executes agent turns, which needs a
+            # configured agent step — supplied by the composition root, not the
+            # generic REST surface. Honest 501 rather than a silent no-op.
+            raise HTTPException(
+                status_code=501,
+                detail="run-forward requires a configured agent step (forward_step)",
+            )
+        results = await branch_manager.run_forward(
+            branch_id=req.branch_id, until_turn=req.until_turn, step=forward_step
+        )
+        return {
+            "branch_id": req.branch_id,
+            "until_turn": req.until_turn,
+            "steps": len(results),
+        }
 
     return app

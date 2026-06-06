@@ -206,6 +206,13 @@ async def _main() -> None:  # pragma: no cover - GKE Job entrypoint
         print("\n=== ACTIVE TEAM BELIEFS ===")
         for b in result.final_beliefs:
             print("  ", b)
+        # Learning meta-agent: damped per-topic trust after any reconciliation
+        # (wired live via spawn_agent's on_reconciled hook).
+        record = await ezra.graph_store.get(FLEET_GRAPH)
+        if record is not None:
+            print("\n=== AGENT TRUST (post-reconciliation, 'tyres') ===")
+            for reg in record.active_agents:
+                print(f"   {reg.agent_id}: {reg.trust_scores.get('tyres')}")
     finally:
         await ezra.aclose()
 

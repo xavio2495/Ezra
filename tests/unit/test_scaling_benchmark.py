@@ -25,3 +25,51 @@ async def test_run_benchmark_produces_one_point_per_count():
     assert [p.agent_count for p in result.points] == [1, 3]
     assert all(p.samples > 0 for p in result.points)
     assert all(p.p99_ms >= p.p50_ms for p in result.points)
+
+
+async def test_run_benchmark_runs_the_fleet_concurrently(monkeypatch):
+    """The defining property: at a given count, agents are in flight at the same
+    time — not serialised. A tracking LLM records the max concurrent in-flight."""
+    import asyncio
+
+    import demo.scaling_benchmark as sb
+
+    state = {"inflight": 0, "max": 0}
+
+    class TrackingLLM:
+        async def complete(self, messages, **kwargs):
+            state["inflight"] += 1
+            state["max"] = max(state["max"], state["inflight"])
+            await asyncio.sleep(0.01)
+            state["inflight"] -= 1
+            return "ack"
+
+    monkeypatch.setattr(sb, "_InstantLLM", TrackingLLM)
+    hot = HotTier(aioredis.FakeRedis(decode_responses=True), max_turns=8)
+    await sb.run_benchmark(
+        agent_counts=(5,), turns_per_agent=1, warmup_turns=0, hot=hot, concurrent=True
+    )
+    assert state["max"] >= 2  # multiple agents overlapped inside the router/LLM
+
+
+async def test_run_benchmark_sequential_mode_does_not_overlap(monkeypatch):
+    import asyncio
+
+    import demo.scaling_benchmark as sb
+
+    state = {"inflight": 0, "max": 0}
+
+    class TrackingLLM:
+        async def complete(self, messages, **kwargs):
+            state["inflight"] += 1
+            state["max"] = max(state["max"], state["inflight"])
+            await asyncio.sleep(0.001)
+            state["inflight"] -= 1
+            return "ack"
+
+    monkeypatch.setattr(sb, "_InstantLLM", TrackingLLM)
+    hot = HotTier(aioredis.FakeRedis(decode_responses=True), max_turns=8)
+    await sb.run_benchmark(
+        agent_counts=(5,), turns_per_agent=1, warmup_turns=0, hot=hot, concurrent=False
+    )
+    assert state["max"] == 1  # one at a time

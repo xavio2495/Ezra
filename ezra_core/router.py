@@ -14,7 +14,7 @@ sessions. LLM-based fact extraction belongs to the learning meta-agent
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Callable, Literal, Optional, Sequence
+from typing import Any, Callable, Literal, NamedTuple, Optional, Sequence
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
@@ -30,6 +30,7 @@ from ezra_core.belief.replay import snapshot_now
 from ezra_core.belief.store import BeliefStore
 from ezra_core.mesh.base import BaseConnector
 from ezra_core.memory.procedural import ProceduralStore
+from ezra_core.meta_agent.learning import LearningMetaAgent, LearningReport
 from ezra_core.observability.tracer import EzraTracer, RouterStep
 from ezra_core.memory.semantic import SemanticStore
 from ezra_core.policy.engine import PolicyEngine
@@ -232,6 +233,16 @@ class TurnResult(BaseModel):
     context: AssembledContext
     pinned_beliefs: list[Commitment] = Field(default_factory=list)
     mesh_result: Optional[MeshResult] = None
+    learning_report: Optional[LearningReport] = None
+
+
+class _AssembledTurn(NamedTuple):
+    """Internal: the product of steps 3-6, shared by ``assemble_context`` (which
+    returns just the context) and ``run_turn`` (which goes on to call the LLM)."""
+
+    context: AssembledContext
+    mesh_result: Optional[MeshResult]
+    pinned_beliefs: list[Commitment]
 
 
 class Router:
@@ -253,6 +264,7 @@ class Router:
         salience_decay_rate: float = 0.1,
         warm_limit: int = 5,
         tracer: Optional[EzraTracer] = None,
+        learning: Optional[LearningMetaAgent] = None,
     ) -> None:
         self._hot = hot
         self._belief = belief_store
@@ -264,8 +276,9 @@ class Router:
         self._decay = salience_decay_rate
         self._warm_limit = warm_limit
         self._tracer = tracer or EzraTracer.disabled()
+        self._learning = learning
 
-    async def run_turn(
+    async def assemble_context(
         self,
         *,
         agent: AgentRegistration,
@@ -274,7 +287,32 @@ class Router:
         mesh_query: Optional[str] = None,
         mesh_topics: Sequence[str] = (),
         as_of: Optional[datetime] = None,
-    ) -> TurnResult:
+    ) -> AssembledContext:
+        """Assemble the exact context this agent would see for ``user_input`` —
+        steps 3/4/5/6 — without calling the model or writing back. Useful for
+        inspecting what an agent is about to be handed (the same shape ``replay``
+        reconstructs)."""
+        return (
+            await self._assemble_turn(
+                agent=agent,
+                user_input=user_input,
+                system_prompt=system_prompt,
+                mesh_query=mesh_query,
+                mesh_topics=mesh_topics,
+                as_of=as_of,
+            )
+        ).context
+
+    async def _assemble_turn(
+        self,
+        *,
+        agent: AgentRegistration,
+        user_input: str,
+        system_prompt: str,
+        mesh_query: Optional[str],
+        mesh_topics: Sequence[str],
+        as_of: Optional[datetime],
+    ) -> "_AssembledTurn":
         scope = set(agent.permission_scope)
         graph_id = agent.session_graph_id
         agent_id = agent.agent_id
@@ -320,6 +358,37 @@ class Router:
                 mesh_result=mesh_result,
                 user_input=user_input,
             )
+        return _AssembledTurn(
+            context=context,
+            mesh_result=mesh_result,
+            pinned_beliefs=belief_snap.commitments,
+        )
+
+    async def run_turn(
+        self,
+        *,
+        agent: AgentRegistration,
+        user_input: str,
+        system_prompt: str = "",
+        mesh_query: Optional[str] = None,
+        mesh_topics: Sequence[str] = (),
+        as_of: Optional[datetime] = None,
+        user_id: str = "",
+    ) -> TurnResult:
+        graph_id = agent.session_graph_id
+        agent_id = agent.agent_id
+        scope = set(agent.permission_scope)
+
+        assembled = await self._assemble_turn(
+            agent=agent,
+            user_input=user_input,
+            system_prompt=system_prompt,
+            mesh_query=mesh_query,
+            mesh_topics=mesh_topics,
+            as_of=as_of,
+        )
+        context = assembled.context
+        mesh_result = assembled.mesh_result
 
         # Step 7 (LLM).
         with self._tracer.span(RouterStep.LLM, agent_id=agent_id):
@@ -331,12 +400,29 @@ class Router:
                 graph_id, agent_id, {"input": user_input, "response": response}
             )
 
+        # Learning meta-agent — picks up async work from step 8 (HANDOFF): extract
+        # durable facts, score/persist them, promote, update trust. Runs after the
+        # response is produced (never blocks the model call). Skipped when no
+        # learning agent is wired or no user_id is supplied to attribute facts to.
+        learning_report: Optional[LearningReport] = None
+        if self._learning is not None and user_id:
+            with self._tracer.span("meta.learning", agent_id=agent_id):
+                learning_report = await self._learning.run_after_turn(
+                    user_id=user_id,
+                    scope_topics=scope,
+                    source_graph_ids=[graph_id],
+                    user_input=user_input,
+                    response=response,
+                    agent_id=agent_id,
+                )
+
         return TurnResult(
             agent_id=agent.agent_id,
             response=response,
             context=context,
-            pinned_beliefs=belief_snap.commitments,
+            pinned_beliefs=assembled.pinned_beliefs,
             mesh_result=mesh_result,
+            learning_report=learning_report,
         )
 
     def _assemble(

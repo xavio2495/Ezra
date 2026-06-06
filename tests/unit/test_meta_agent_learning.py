@@ -80,6 +80,69 @@ def test_record_reconciliation_updates_registration_in_place():
     assert reg.trust_scores["parts"] == 0.84
 
 
+class _ExtractLLM:
+    """Fake LLM that returns a JSON fact list for the extraction prompt."""
+
+    def __init__(self, reply):
+        self.reply = reply
+
+    async def complete(self, messages, **kwargs):
+        return self.reply
+
+
+async def test_extract_facts_parses_llm_json_into_archival_facts():
+    llm = _ExtractLLM(
+        '```json\n[{"subject":"soft tyre","predicate":"overheats",'
+        '"object":"after lap 40","topics":["tyres","aero"],"confidence":0.9}]\n```'
+    )
+    agent = LearningMetaAgent(InMemorySemanticStore(), llm=llm)
+    facts = await agent.extract_facts(
+        user_id="team",
+        source_graph_id="race-1",
+        agent_id="tyre",
+        user_input="how are the softs?",
+        response="overheating after lap 40",
+        scope_topics={"tyres"},
+    )
+    assert len(facts) == 1
+    f = facts[0]
+    assert (f.subject, f.predicate, f.object) == ("soft tyre", "overheats", "after lap 40")
+    assert f.tier == "archival"
+    assert f.source_session_graph_ids == ["race-1"]
+    assert f.topics == ["tyres"]  # out-of-scope 'aero' filtered out
+
+
+async def test_extract_facts_no_llm_returns_empty():
+    agent = LearningMetaAgent(InMemorySemanticStore())  # no llm
+    facts = await agent.extract_facts(
+        user_id="team", source_graph_id="race-1", agent_id="x",
+        user_input="hi", response="hello",
+    )
+    assert facts == []
+
+
+async def test_run_after_turn_extracts_when_no_candidates_given():
+    store = InMemorySemanticStore()
+    llm = _ExtractLLM(
+        '[{"subject":"front wing","predicate":"stock","object":"critical",'
+        '"topics":["parts"],"confidence":0.95}]'
+    )
+    agent = LearningMetaAgent(store, llm=llm)
+    report = await agent.run_after_turn(
+        user_id="team",
+        scope_topics={"parts"},
+        source_graph_ids=["race-1"],
+        user_input="wing stock?",
+        response="2 of 4 needed",
+        agent_id="parts",
+    )
+    assert len(report.persisted_fact_ids) == 1
+    archived = await store.get_archival(
+        user_id="team", scope_topics={"parts"}, source_graph_ids=["race-1"]
+    )
+    assert archived and archived[0].subject == "front wing"
+
+
 async def test_run_after_turn_reports_writes_promotions_and_trust():
     store = InMemorySemanticStore()
     await store.add(_fact("hot", access_count=5))

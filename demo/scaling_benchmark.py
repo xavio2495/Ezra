@@ -1,10 +1,13 @@
-"""Scaling benchmark — 1 → 50 simulated agents in one session graph.
+"""Scaling benchmark — 1 → 50 *concurrent* agents in one session graph.
 
 Measures per-agent router overhead (context assembly + tier reads + write-back)
-across a growing fleet and reports the p50/p99 curve. The benchmark uses a
-near-instant fake agent LLM so the measured time is the *router overhead*, not
-model latency — matching the calibrated SLA wording (p50 <40ms / p99 <100ms
-per-agent overhead, excluding the LLM call, at 5–100 agents).
+across a growing fleet and reports the p50/p99 curve. Every agent in a fleet runs
+its turns **concurrently** (``asyncio.gather``) so the measured latency reflects
+real contention on the shared event loop + tiers at that scale — not isolated
+per-call timing. The benchmark uses a near-instant fake agent LLM so the measured
+time is the *router overhead*, not model latency — matching the calibrated SLA
+wording (p50 <40ms / p99 <100ms per-agent overhead, excluding the LLM call, at
+5–100 agents).
 
 ``percentile`` and ``summarise`` are pure and unit-tested; ``run_benchmark``
 accepts an injected ``HotTier`` so tests can drive it with fakeredis.
@@ -12,6 +15,7 @@ accepts an injected ``HotTier`` so tests can drive it with fakeredis.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from datetime import datetime, timezone
 from math import ceil, floor
@@ -86,6 +90,7 @@ async def run_benchmark(
     warmup_turns: int = 5,
     hot: Optional[HotTier] = None,
     graph_id: str = "scaling-benchmark",
+    concurrent: bool = True,
 ) -> BenchmarkResult:
     if hot is None:  # pragma: no cover - real-redis path used by the script main
         import redis.asyncio as aioredis
@@ -101,15 +106,28 @@ async def run_benchmark(
     for _ in range(warmup_turns):
         await warmup_router.run_turn(agent=_agent(graph_id, -1), user_input="warmup")
 
+    async def _drive(router: Router, agent) -> list[float]:
+        """One agent's turns; returns the per-turn router-overhead latencies (ms)."""
+        local: list[float] = []
+        for _ in range(turns_per_agent):
+            start = time.perf_counter()
+            await router.run_turn(agent=agent, user_input="status?")
+            local.append((time.perf_counter() - start) * 1000.0)
+        return local
+
     result = BenchmarkResult()
     for count in agent_counts:
         router = Router(hot=hot, belief_store=InMemoryBeliefStore(), llm=_InstantLLM())
         agents = [_agent(graph_id, i) for i in range(count)]
         latencies: list[float] = []
-        for _ in range(turns_per_agent):
+        if concurrent:
+            # All `count` agents run their turns at once — the latency each turn
+            # sees now includes contention from the rest of the fleet.
+            per_agent = await asyncio.gather(*(_drive(router, a) for a in agents))
+            for lst in per_agent:
+                latencies.extend(lst)
+        else:
             for agent in agents:
-                start = time.perf_counter()
-                await router.run_turn(agent=agent, user_input="status?")
-                latencies.append((time.perf_counter() - start) * 1000.0)
+                latencies.extend(await _drive(router, agent))
         result.points.append(summarise(count, latencies))
     return result

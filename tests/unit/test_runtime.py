@@ -16,6 +16,8 @@ from ezra_core.belief.branching import BranchManager, InMemoryBranchStore
 from ezra_core.belief.store import InMemoryBeliefStore
 from ezra_core.config import EzraSettings
 from ezra_core.memory.semantic import InMemorySemanticStore
+from ezra_core.meta_agent.learning import LearningMetaAgent
+from ezra_core.meta_agent.lifecycle import LifecycleMetaAgent
 from ezra_core.runtime import Ezra
 from ezra_core.schemas.belief import Contradiction
 from ezra_core.session_graph import InMemorySessionGraphStore
@@ -28,6 +30,12 @@ class FakeLLM:
         self.reply = reply
 
     async def complete(self, messages, **kwargs):
+        content = messages[-1]["content"] if messages else ""
+        if "Extract durable" in content:
+            return (
+                '[{"subject":"soft tyre","predicate":"overheats",'
+                '"object":"after lap 40","topics":["tyres"],"confidence":0.9}]'
+            )
         return self.reply
 
 
@@ -44,23 +52,28 @@ class StubChecker:
         return self.result
 
 
-def _ezra(*, checker=None, closers=()):
+def _ezra(*, checker=None, closers=(), with_meta_agents=False):
     graph_store = InMemorySessionGraphStore()
     belief = InMemoryBeliefStore()
     semantic = InMemorySemanticStore()
+    llm = FakeLLM()
     branches = BranchManager(
         graph_store=graph_store, belief_store=belief, branch_store=InMemoryBranchStore()
     )
+    learning = LearningMetaAgent(semantic, llm=llm) if with_meta_agents else None
+    lifecycle = LifecycleMetaAgent(graph_store, belief_store=belief) if with_meta_agents else None
     return Ezra(
         settings=EzraSettings(),
         graph_store=graph_store,
         belief_store=belief,
         semantic_store=semantic,
         hot=HotTier(FakeAsyncRedis(decode_responses=True)),
-        llm=FakeLLM(),
+        llm=llm,
         warm=WarmTier(AsyncQdrantClient(location=":memory:"), FakeEmbedder()),
         checker=checker,
         branch_manager=branches,
+        learning=learning,
+        lifecycle=lifecycle,
         closers=closers,
     )
 
@@ -107,6 +120,79 @@ async def test_belief_check_reaches_injected_checker():
     graph = await ezra.create_session_graph(session_graph_id="race-1")
     svc = await ezra.spawn_agent(graph, agent_id="strategist", permission_scope=["tyres"])
     assert await svc.belief_check("run mediums", "tyres") is contradiction
+
+
+async def test_spawn_agent_with_user_id_runs_learning_and_persists_facts():
+    ezra = _ezra(with_meta_agents=True)
+    graph = await ezra.create_session_graph(session_graph_id="race-1")
+    svc = await ezra.spawn_agent(
+        graph, agent_id="tyre", permission_scope=["tyres"], user_id="team-1"
+    )
+
+    result = await svc.complete("how are the softs holding up?")
+    assert result.learning_report is not None
+    assert len(result.learning_report.persisted_fact_ids) == 1
+
+    facts = await ezra.semantic_store.get_archival(
+        user_id="team-1", scope_topics={"tyres"}, source_graph_ids=["race-1"]
+    )
+    assert facts and facts[0].subject == "soft tyre"
+
+
+async def test_run_lifecycle_tick_closes_idle_graph():
+    ezra = _ezra(with_meta_agents=True)
+    graph = await ezra.create_session_graph(session_graph_id="race-1")
+    svc = await ezra.spawn_agent(graph, agent_id="tyre", permission_scope=["tyres"])
+    await graph.terminate_agent("tyre")
+
+    report = await ezra.run_lifecycle_tick("race-1")
+    assert report is not None and report.transition == "closed"
+
+
+async def test_run_lifecycle_tick_noop_without_lifecycle_agent():
+    ezra = _ezra()  # no meta-agents wired
+    await ezra.create_session_graph(session_graph_id="race-1")
+    assert await ezra.run_lifecycle_tick("race-1") is None
+
+
+class DynChecker:
+    """Flags a contradiction iff an active commitment on the topic differs."""
+
+    def check(self, *, new_claim, new_topic, new_agent_id, commitments):
+        for c in commitments:
+            if c.topic == new_topic and c.claim != new_claim:
+                return Contradiction(
+                    existing_commitment_id=c.id,
+                    existing_agent_id=c.agent_id,
+                    new_input_claim=new_claim,
+                    new_agent_id=new_agent_id,
+                    topic=new_topic,
+                    similarity_score=0.9,
+                    nli_confidence=0.9,
+                    detected_at=datetime.now(timezone.utc),
+                )
+        return None
+
+
+async def test_live_reconciliation_damps_trust_via_learning():
+    ezra = _ezra(checker=DynChecker(), with_meta_agents=True)
+    graph = await ezra.create_session_graph(
+        session_graph_id="race-1", merge_strategy="highest_trust"
+    )
+    a = await ezra.spawn_agent(graph, agent_id="tyre", permission_scope=["tyres"])
+    b = await ezra.spawn_agent(graph, agent_id="strategist", permission_scope=["tyres"])
+    for reg in graph.active_agents:
+        reg.trust_scores["tyres"] = {"tyre": 0.95, "strategist": 0.80}[reg.agent_id]
+    await ezra.graph_store.save(graph.record)
+
+    await a.commit("run mediums", "tyres", turn_index=1)
+    out = await b.commit("run softs", "tyres", turn_index=2)
+    assert out.contradiction is not None
+    assert out.resolution.decision == "keep_existing"  # tyre 0.95 beats strategist 0.80
+
+    trust = {r.agent_id: r.trust_scores["tyres"] for r in graph.active_agents}
+    assert trust["tyre"] == 0.96  # winner damped toward 1.0
+    assert trust["strategist"] == 0.64  # loser damped toward 0.0
 
 
 async def test_aclose_drains_closers():

@@ -127,7 +127,9 @@ class Ezra:
 
         llm = llm_from_settings(settings)
         learning = LearningMetaAgent(
-            cold.semantic, promotion_access_count=settings.core_promotion_access_count
+            cold.semantic,
+            llm=llm,
+            promotion_access_count=settings.core_promotion_access_count,
         )
         lifecycle = LifecycleMetaAgent(graph_store, belief_store=cold.beliefs, warm=warm)
         tracer = tracer_from_settings(settings)
@@ -180,13 +182,15 @@ class Ezra:
         agent_id: str,
         permission_scope: list[str],
         role: str = "",
+        user_id: str = "",
         mesh: Optional[BaseConnector] = None,
     ) -> EzraService:
         """Register an agent on ``graph`` and return its scope-bound service.
 
         The per-agent ``Router`` and ``EzraService`` share the runtime's stores
         but carry this agent's identity + scope; ``mesh`` (optional) is the
-        federated connector this agent is allowed to query.
+        federated connector this agent is allowed to query. ``user_id`` attributes
+        learning-extracted facts (the learning meta-agent runs after every turn).
         """
         await graph.spawn_agent(
             agent_id=agent_id, permission_scope=permission_scope, role=role
@@ -201,6 +205,7 @@ class Ezra:
             context_limit=self.settings.context_limit,
             salience_decay_rate=self.settings.salience_decay_rate,
             tracer=self.tracer,
+            learning=self.learning,
         )
 
         def trust_for(other_agent_id: str, topic: str) -> float:
@@ -209,10 +214,31 @@ class Ezra:
                     return reg.trust_scores.get(topic, 1.0)
             return 1.0
 
+        async def on_reconciled(contradiction, resolution) -> None:
+            # Learning meta-agent: damp the winner's per-topic trust toward 1.0 and
+            # the loser's toward 0.0 after a decisive reconciliation, then persist.
+            if self.learning is None or resolution.decision not in ("accept_new", "keep_existing"):
+                return
+            new_won = resolution.decision == "accept_new"
+            winner = agent_id if new_won else contradiction.existing_agent_id
+            loser = contradiction.existing_agent_id if new_won else agent_id
+            topic = contradiction.topic
+            changed = False
+            for reg in graph.active_agents:
+                if reg.agent_id == winner:
+                    self.learning.record_reconciliation(reg, topic, won=True)
+                    changed = True
+                elif reg.agent_id == loser:
+                    self.learning.record_reconciliation(reg, topic, won=False)
+                    changed = True
+            if changed:
+                await self.graph_store.save(graph.record)
+
         return EzraService(
             session_graph_id=graph.session_graph_id,
             agent_id=agent_id,
             permission_scope=permission_scope,
+            user_id=user_id,
             belief_store=self.belief_store,
             router=router,
             warm=self.warm,
@@ -224,7 +250,22 @@ class Ezra:
             custom_resolver=graph.custom_resolver,
             manual_resolution_timeout_seconds=self.settings.manual_resolution_timeout_seconds,
             trust_for=trust_for,
+            on_reconciled=on_reconciled,
         )
+
+    # -- meta-agents ------------------------------------------------------ #
+    async def run_lifecycle_tick(self, session_graph_id: str):
+        """Run one scheduled lifecycle pass for a graph (state transitions, warm
+        compaction, belief-retention TTL), traced as a ``meta.lifecycle`` span.
+
+        This is the runtime hook a scheduler (or the demo loop) calls on the
+        HANDOFF cadence (5 min / active graph, 1 hr / closed). Returns the
+        ``LifecycleReport``; no-op (None) when no lifecycle agent is wired.
+        """
+        if self.lifecycle is None:
+            return None
+        with self.tracer.span("meta.lifecycle", session_graph_id=session_graph_id):
+            return await self.lifecycle.tick(session_graph_id)
 
     # -- lifecycle -------------------------------------------------------- #
     async def aclose(self) -> None:

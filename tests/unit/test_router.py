@@ -130,6 +130,66 @@ async def test_run_turn_emits_router_step_spans():
             "router.llm", "router.write_back"} <= span_names
 
 
+class _ExtractingLLM:
+    """Returns JSON facts for the extraction prompt, a normal reply otherwise."""
+
+    async def complete(self, messages, **kwargs):
+        content = messages[-1]["content"] if messages else ""
+        if "Extract durable" in content:
+            return (
+                '[{"subject":"soft tyre","predicate":"overheats",'
+                '"object":"after lap 40","topics":["tyres"],"confidence":0.9}]'
+            )
+        return "box this lap"
+
+
+async def _learning_router(tracer=None):
+    from ezra_core.memory.semantic import InMemorySemanticStore
+    from ezra_core.meta_agent.learning import LearningMetaAgent
+
+    hot = HotTier(aioredis.FakeRedis(decode_responses=True), max_turns=8)
+    beliefs = InMemoryBeliefStore()
+    semantic = InMemorySemanticStore()
+    llm = _ExtractingLLM()
+    learning = LearningMetaAgent(semantic, llm=llm)
+    router = Router(
+        hot=hot, belief_store=beliefs, llm=llm, learning=learning, tracer=tracer
+    )
+    return router, semantic
+
+
+async def test_run_turn_runs_learning_pass_and_persists_extracted_facts():
+    router, semantic = await _learning_router()
+    result = await router.run_turn(
+        agent=_agent(["tyres"]), user_input="tyre status?", user_id="team-1"
+    )
+    assert result.learning_report is not None
+    assert len(result.learning_report.persisted_fact_ids) == 1
+    facts = await semantic.get_archival(
+        user_id="team-1", scope_topics={"tyres"}, source_graph_ids=["race-1"]
+    )
+    assert facts and facts[0].subject == "soft tyre"
+
+
+async def test_run_turn_skips_learning_without_user_id():
+    router, semantic = await _learning_router()
+    result = await router.run_turn(agent=_agent(["tyres"]), user_input="tyre status?")
+    assert result.learning_report is None
+    facts = await semantic.get_archival(
+        user_id="team-1", scope_topics={"tyres"}, source_graph_ids=["race-1"]
+    )
+    assert facts == []
+
+
+async def test_run_turn_emits_learning_span():
+    from ezra_core.observability.tracer import EzraTracer
+
+    tracer, exporter = EzraTracer.in_memory()
+    router, _ = await _learning_router(tracer=tracer)
+    await router.run_turn(agent=_agent(["tyres"]), user_input="status?", user_id="team-1")
+    assert "meta.learning" in {s.name for s in exporter.get_finished_spans()}
+
+
 async def test_run_turn_mesh_fetch_policy_denied():
     connector = SnowflakeConnector("wh.inventory", executor=lambda sql: [])
     router, *_ = await _router(policy=PolicyEngine(enabled=True), mesh=connector)

@@ -13,7 +13,7 @@ arrives with the runtime/SDK work.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Optional, Sequence
+from typing import Any, Awaitable, Callable, Optional, Sequence
 
 from pydantic import BaseModel, Field
 
@@ -50,6 +50,7 @@ class EzraService:
         agent_id: str,
         permission_scope: list[str],
         belief_store: BeliefStore,
+        user_id: str = "",
         router: Optional[Router] = None,
         warm: Optional[WarmTier] = None,
         checker: Optional[ContradictionChecker] = None,
@@ -60,10 +61,14 @@ class EzraService:
         custom_resolver: Optional[CustomResolver] = None,
         manual_resolution_timeout_seconds: int = 30,
         trust_for: Optional[Callable[[str, str], float]] = None,
+        on_reconciled: Optional[
+            Callable[[Contradiction, Resolution], Awaitable[None]]
+        ] = None,
     ) -> None:
         self.session_graph_id = session_graph_id
         self.agent_id = agent_id
         self.permission_scope = list(permission_scope)
+        self.user_id = user_id
         self._belief = belief_store
         self._router = router
         self._warm = warm
@@ -76,6 +81,8 @@ class EzraService:
         self._manual_timeout = manual_resolution_timeout_seconds
         # (agent_id, topic) -> trust score; defaults to 1.0 when unknown.
         self._trust_for = trust_for or (lambda agent_id, topic: 1.0)
+        # Post-reconciliation hook (learning meta-agent damps trust); no-op if None.
+        self._on_reconciled = on_reconciled
 
     @property
     def _scope(self) -> set[str]:
@@ -212,6 +219,11 @@ class EzraService:
         ):
             await self._belief.supersede(contradiction.existing_commitment_id, commitment.id)
 
+        # Hand the resolved contradiction to the learning meta-agent (damped trust
+        # updates for winner/loser). Best-effort: never block the commit on it.
+        if contradiction is not None and resolution is not None and self._on_reconciled:
+            await self._on_reconciled(contradiction, resolution)
+
         return CommitResult(
             commitment=commitment, contradiction=contradiction, resolution=resolution
         )
@@ -229,6 +241,7 @@ class EzraService:
     async def complete(self, user_input: str, *, system_prompt: str = "", **kwargs) -> TurnResult:
         if self._router is None:
             raise RuntimeError("no router configured for this agent")
+        kwargs.setdefault("user_id", self.user_id)
         return await self._router.run_turn(
             agent=self._registration(),
             user_input=user_input,
