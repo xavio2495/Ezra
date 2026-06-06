@@ -87,3 +87,38 @@ async def test_snowflake_connector_returns_typed_result_with_time_travel(monkeyp
     assert result.provenance.source == "snowflake:EZRA.PUBLIC.RACE_RESULTS"
     assert result.data == [{"ROUND": 1, "DRIVER": "VER"}]
     assert result.topics == ["strategy"]
+
+
+import os  # noqa: E402
+
+import pytest  # noqa: E402
+
+
+@pytest.mark.skipif(
+    os.environ.get("EZRA_RUN_NLI_TESTS") != "1",
+    reason="set EZRA_RUN_NLI_TESTS=1 (+ EZRA_LLM_API_KEY) to call the real Gemini translator",
+)
+def test_real_gemini_nl_to_sql_stays_within_allowlist():
+    """Real-model translation: the generated predicate must reference only
+    allowlisted columns and contain no DDL/DML (the safety layer holds on real
+    LLM output, not just fakes)."""
+    from ezra_core.mesh.snowflake import SnowflakeConnector
+    from ezra_core.mesh.translate import LLMQueryTranslator
+
+    columns = {"season": "int", "circuit": "str", "winner": "str"}
+    conn = SnowflakeConnector(
+        "EZRA.PUBLIC.RACE_RESULTS",
+        columns=columns,
+        translator=LLMQueryTranslator(
+            os.environ.get("EZRA_LLM_MODEL", "gemini/gemini-3.5-flash"),
+            api_key=os.environ.get("EZRA_LLM_API_KEY") or None,
+        ),
+    )
+    sql = conn.build_sql("who won the 2023 Monaco Grand Prix?")
+    lowered = sql.lower()
+    assert lowered.startswith("select ")
+    assert "race_results" in lowered
+    for bad in (";", " drop ", " insert ", " update ", " delete ", " union "):
+        assert bad not in lowered
+    # any column-like token after WHERE must be allowlisted (sanity, not exhaustive)
+    assert "salary" not in lowered and "secret" not in lowered

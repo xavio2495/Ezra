@@ -16,6 +16,7 @@ from typing import Optional
 from ezra_core.config import EzraSettings
 from ezra_core.mesh.bigquery import BigQueryConnector
 from ezra_core.mesh.snowflake import SnowflakeConnector
+from ezra_core.mesh.translate import translator_from_settings
 
 
 def snowflake_executor_from_settings(settings: EzraSettings):
@@ -49,10 +50,20 @@ def snowflake_executor_from_settings(settings: EzraSettings):
 
 
 def snowflake_connector_from_settings(
-    settings: EzraSettings, table: str, *, topics: Optional[list[str]] = None
+    settings: EzraSettings,
+    table: str,
+    *,
+    topics: Optional[list[str]] = None,
+    columns: Optional[dict[str, str]] = None,
 ) -> SnowflakeConnector:
+    # A column allowlist enables NL→SQL translation (the LLM fills a validated
+    # predicate; the connector owns FROM + time-travel). No columns → SELECT *.
     return SnowflakeConnector(
-        table, executor=snowflake_executor_from_settings(settings), topics=topics
+        table,
+        executor=snowflake_executor_from_settings(settings),
+        topics=topics,
+        columns=columns,
+        translator=translator_from_settings(settings) if columns else None,
     )
 
 
@@ -73,8 +84,16 @@ def bigquery_executor_from_settings(settings: EzraSettings):
 
 
 def bigquery_connector_from_settings(
-    settings: EzraSettings, table: str, *, topics: Optional[list[str]] = None
+    settings: EzraSettings,
+    table: str,
+    *,
+    topics: Optional[list[str]] = None,
+    columns: Optional[dict[str, str]] = None,
 ) -> BigQueryConnector:
     return BigQueryConnector(
-        table, executor=bigquery_executor_from_settings(settings), topics=topics
+        table,
+        executor=bigquery_executor_from_settings(settings),
+        topics=topics,
+        columns=columns,
+        translator=translator_from_settings(settings) if columns else None,
     )

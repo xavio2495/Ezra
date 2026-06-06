@@ -11,6 +11,7 @@ from typing import Any, Awaitable, Callable, Optional, Union
 
 from ezra_core.mesh.base import BaseConnector
 from ezra_core.mesh.time_travel import bigquery_time_travel_clause
+from ezra_core.mesh.translate import QueryTranslator, compose_select
 from ezra_core.schemas.mesh import MeshResult
 
 Executor = Callable[[str], Union[Any, Awaitable[Any]]]
@@ -26,15 +27,25 @@ class BigQueryConnector(BaseConnector):
         executor: Optional[Executor] = None,
         topics: Optional[list[str]] = None,
         synced_at: Optional[datetime] = None,
+        columns: Optional[dict[str, str]] = None,
+        translator: Optional[QueryTranslator] = None,
     ) -> None:
         self._table = table
         self._executor = executor
         self._topics = topics or []
         self._synced_at = synced_at
+        # See SnowflakeConnector: NL→native translation when columns+translator
+        # are configured, else the safe SELECT *.
+        self._columns = columns or {}
+        self._translator = translator
 
     def build_sql(self, query: str, as_of: Optional[datetime] = None) -> str:
-        clause = f" {bigquery_time_travel_clause(as_of)}" if as_of else ""
-        return f"SELECT * FROM `{self._table}`{clause}"
+        clause = bigquery_time_travel_clause(as_of) if as_of else ""
+        if self._translator is not None and self._columns:
+            pred = self._translator.to_sql(query, columns=self._columns)
+            return compose_select(f"`{self._table}`", pred, time_travel=clause)
+        tt = f" {clause}" if clause else ""
+        return f"SELECT * FROM `{self._table}`{tt}"
 
     async def fetch(
         self,

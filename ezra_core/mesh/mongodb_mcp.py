@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import Optional
 
 from ezra_core.mesh.base import BaseConnector
+from ezra_core.mesh.translate import QueryTranslator
 from ezra_core.schemas.mesh import MeshResult
 
 
@@ -25,11 +26,17 @@ class MongoMcpConnector(BaseConnector):
         source_name: str = "mongodb",
         limit: int = 50,
         topics: Optional[list[str]] = None,
+        columns: Optional[dict[str, str]] = None,
+        translator: Optional[QueryTranslator] = None,
     ) -> None:
         self._c = collection
         self._source = source_name
         self._limit = limit
         self._topics = topics or []
+        # With columns+translator, NL intent → a validated find filter; otherwise
+        # a literal JSON filter in the query string (or find-all).
+        self._columns = columns or {}
+        self._translator = translator
 
     @staticmethod
     def _parse_filter(query: str) -> dict:
@@ -41,6 +48,11 @@ class MongoMcpConnector(BaseConnector):
                 return {}
         return {}
 
+    def _filter_for(self, query: str) -> dict:
+        if self._translator is not None and self._columns:
+            return self._translator.to_mongo_filter(query, columns=self._columns)
+        return self._parse_filter(query)
+
     async def fetch(
         self,
         query: str,
@@ -48,7 +60,7 @@ class MongoMcpConnector(BaseConnector):
         permission_scope: list[str],
         as_of: Optional[datetime] = None,
     ) -> MeshResult:
-        filt = self._parse_filter(query)
+        filt = self._filter_for(query)
         cursor = self._c.find(filt).limit(self._limit)
         docs = []
         async for doc in cursor:
