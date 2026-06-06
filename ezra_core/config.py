@@ -42,6 +42,9 @@ class EzraSettings(BaseSettings):
 
     # Mesh connectors (federated sources). Blank = connector not configured.
     mongodb_mcp_url: str = "http://localhost:3001"
+    # Atlas Stream Processing (live telemetry via MCP atlas-streams-*).
+    atlas_streams_workspace: str = ""
+    atlas_streams_processor: str = ""
     snowflake_account: str = ""
     snowflake_user: str = ""
     snowflake_password: str = ""

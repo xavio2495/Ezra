@@ -1,6 +1,7 @@
-"""Federated query connectors. Built-in: MongoDB MCP, REST, Snowflake,
-BigQuery, FastF1 (demo)."""
+"""Federated query connectors. Built-in: MongoDB MCP, Atlas Stream Processing,
+REST, Snowflake, BigQuery, FastF1 (demo)."""
 
+from ezra_core.mesh.atlas_streams import AtlasStreamsConnector
 from ezra_core.mesh.base import BaseConnector
 from ezra_core.mesh.bigquery import BigQueryConnector
 from ezra_core.mesh.fastf1_adapter import FastF1Connector
@@ -11,6 +12,7 @@ from ezra_core.mesh.snowflake import SnowflakeConnector
 __all__ = [
     "BaseConnector",
     "MongoMcpConnector",
+    "AtlasStreamsConnector",
     "RestConnector",
     "SnowflakeConnector",
     "BigQueryConnector",

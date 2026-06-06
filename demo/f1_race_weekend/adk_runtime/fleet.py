@@ -101,6 +101,11 @@ def _mesh_for(ezra: Ezra, role_id: str):
         # BigQuery = engineering/aero analytics — aero_rd's own domain.
         table = f"{s.bigquery_project}.{s.bigquery_dataset}.aero_configs"
         return bigquery_connector_from_settings(s, table, topics=["aero"])
+    if role_id == "telemetry_analyst" and s.atlas_streams_processor:
+        # Atlas Stream Processing = live telemetry time-series (partner track).
+        from ezra_core.mesh.atlas_streams import atlas_streams_connector_from_settings
+
+        return atlas_streams_connector_from_settings(s, topics=["telemetry"])
     return None
 
 
