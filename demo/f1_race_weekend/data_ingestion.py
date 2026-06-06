@@ -649,12 +649,72 @@ def load_results_to_snowflake(settings, rows: list[dict], *, batch_size: int = 5
         conn.close()
 
 
-def load_results_to_bigquery(settings, rows: list[dict], *, table: Optional[str] = None) -> int:
+def load_table_to_snowflake(settings, table: str, rows: list[dict], *, conn=None) -> int:
+    """Generic Snowflake loader: CREATE OR REPLACE ``EZRA.<schema>.<table>`` with
+    STRING columns derived from the row keys (``topics`` dropped), then load. Used
+    for the warehouse's non-results tables (e.g. standings)."""
+    import snowflake.connector
+
+    db = settings.snowflake_database or "EZRA"
+    schema = settings.snowflake_schema or "PUBLIC"
+    cols: list[str] = []
+    for r in rows:
+        for k in r:
+            if k != "topics" and k not in cols:
+                cols.append(k)
+    own = conn is None
+    conn = conn or snowflake.connector.connect(
+        account=settings.snowflake_account, user=settings.snowflake_user,
+        password=settings.snowflake_password, role=settings.snowflake_role or None,
+        warehouse=settings.snowflake_warehouse or None,
+    )
+    try:
+        cur = conn.cursor()
+        cur.execute(f"CREATE DATABASE IF NOT EXISTS {db}")
+        cur.execute(f"CREATE SCHEMA IF NOT EXISTS {db}.{schema}")
+        full = f"{db}.{schema}.{table.upper()}"
+        coldefs = ", ".join(f'"{c.upper()}" STRING' for c in cols)
+        cur.execute(f"CREATE OR REPLACE TABLE {full} ({coldefs})")
+        names = ", ".join(f'"{c.upper()}"' for c in cols)
+        placeholders = ", ".join(["%s"] * len(cols))
+        insert = f"INSERT INTO {full} ({names}) VALUES ({placeholders})"
+        params = [
+            tuple(None if r.get(c) is None else str(r.get(c)) for c in cols) for r in rows
+        ]
+        for start in range(0, len(params), 5000):
+            cur.executemany(insert, params[start : start + 5000])
+        conn.commit()
+        return len(params)
+    finally:
+        if own:
+            conn.close()
+
+
+def load_table_to_bigquery(settings, table: str, rows: list[dict], *, client=None) -> int:
+    """Generic BigQuery loader: WRITE_TRUNCATE ``rows`` into ``table`` with schema
+    autodetect (``topics`` dropped). Used for the engineering/aero analytics tables."""
+    from google.cloud import bigquery
+
+    project = table.split(".")[0]
+    dataset_id = ".".join(table.split(".")[:2])
+    if client is None:
+        client = bigquery.Client(project=project)
+    client.create_dataset(bigquery.Dataset(dataset_id), exists_ok=True)
+    payload = [{k: v for k, v in r.items() if k != "topics"} for r in rows]
+    job_config = bigquery.LoadJobConfig(autodetect=True, write_disposition="WRITE_TRUNCATE")
+    client.load_table_from_json(payload, table, job_config=job_config).result()
+    return len(payload)
+
+
+def load_results_to_bigquery(
+    settings, rows: list[dict], *, table: Optional[str] = None, client=None
+) -> int:
     """Load ``rows`` into a BigQuery table (keyless via ADC / Workload Identity).
 
     Creates the dataset + table if needed and replaces its contents. Returns the
     row count. The table also enables the BigQuery mesh connector's native
-    ``FOR SYSTEM_TIME AS OF`` time-travel on data we own. Lazy SDK import.
+    ``FOR SYSTEM_TIME AS OF`` time-travel on data we own. ``client`` is injectable
+    (tests / explicit credentials); otherwise built from ADC. Lazy SDK import.
     """
     from google.cloud import bigquery
 
@@ -665,7 +725,8 @@ def load_results_to_bigquery(settings, rows: list[dict], *, table: Optional[str]
     )
     project = table.split(".")[0]
     dataset_id = ".".join(table.split(".")[:2])
-    client = bigquery.Client(project=project)
+    if client is None:
+        client = bigquery.Client(project=project)
     client.create_dataset(bigquery.Dataset(dataset_id), exists_ok=True)
 
     schema = [
@@ -755,22 +816,40 @@ async def _main() -> None:  # pragma: no cover - script entry point
         print(f"  {name}: {n}")
     print(f"Done (MongoDB). {total} rows across {len(counts)} collections.")
 
-    # Mirror the historical results into the warehouses the mesh connectors query,
-    # so the federation story spans MongoDB + Snowflake + BigQuery on data we own.
+    # Distribute domain-appropriate slices across the three federated stores so each
+    # source is distinct and each agent's connector returns its own domain:
+    #   Snowflake = historical results + standings (time-travel warehouse)
+    #   BigQuery  = aero / car-setup / R&D analytics (engineering warehouse)
+    #   MongoDB   = everything operational + telemetry + private systems (above)
     results = dataset.get("race_results", [])
-    if results and os.environ.get("EZRA_INGEST_SNOWFLAKE", "true").lower() == "true" \
+    bq_project = settings.bigquery_project or "ezra-498021"
+    bq_dataset = settings.bigquery_dataset or "formula_1"
+
+    if os.environ.get("EZRA_INGEST_SNOWFLAKE", "true").lower() == "true" \
             and settings.snowflake_account:
         try:
             n = await asyncio.to_thread(load_results_to_snowflake, settings, results)
-            print(f"Done (Snowflake). {n} rows in EZRA.PUBLIC.RACE_RESULTS.")
+            print(f"Done (Snowflake RACE_RESULTS). {n} rows.")
+            for tbl in ("driver_standings", "constructor_standings"):
+                rows = dataset.get(tbl, [])
+                if rows:
+                    m = await asyncio.to_thread(load_table_to_snowflake, settings, tbl, rows)
+                    print(f"Done (Snowflake {tbl.upper()}). {m} rows.")
         except Exception as exc:
             print(f"WARN snowflake load failed: {exc}")
-    if results and include_bigquery:
-        try:
-            n = await asyncio.to_thread(load_results_to_bigquery, settings, results)
-            print(f"Done (BigQuery). {n} rows loaded.")
-        except Exception as exc:
-            print(f"WARN bigquery load failed: {exc}")
+
+    if include_bigquery:
+        for tbl in ("aero_configs", "car_setups", "rd_experiments"):
+            rows = dataset.get(tbl, [])
+            if not rows:
+                continue
+            try:
+                n = await asyncio.to_thread(
+                    load_table_to_bigquery, settings, f"{bq_project}.{bq_dataset}.{tbl}", rows
+                )
+                print(f"Done (BigQuery {tbl}). {n} rows.")
+            except Exception as exc:
+                print(f"WARN bigquery {tbl} load failed: {exc}")
 
 
 if __name__ == "__main__":  # pragma: no cover

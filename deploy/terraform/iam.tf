@@ -22,13 +22,22 @@ resource "google_secret_manager_secret_iam_member" "secret_accessor" {
   member    = "serviceAccount:${var.runtime_gsa_email}"
 }
 
-# The ingest job (running as the runtime GSA via WI) queries the public BigQuery
-# F1 dataset. bigquery.jobUser lets it run query jobs billed to this project;
-# the public dataset itself is world-readable.
+# The ingest job (running as the runtime GSA via WI) runs BigQuery jobs.
+# bigquery.jobUser lets it run query/load jobs billed to this project.
 resource "google_project_iam_member" "runtime_bigquery_job_user" {
   project = var.project_id
   role    = "roles/bigquery.jobUser"
   member  = "serviceAccount:${var.runtime_gsa_email}"
+}
+
+# Writing the F1 results table needs table create/write — granted at the DATASET
+# level (least privilege; not project-wide). jobUser runs the job, this lets it
+# create/replace + load the table inside formula_1.
+resource "google_bigquery_dataset_iam_member" "runtime_dataset_editor" {
+  project    = var.project_id
+  dataset_id = "formula_1"
+  role       = "roles/bigquery.dataEditor"
+  member     = "serviceAccount:${var.runtime_gsa_email}"
 }
 
 # The GKE node service account must be able to PULL the API image from Artifact

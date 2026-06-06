@@ -93,11 +93,13 @@ def _mesh_for(ezra: Ezra, role_id: str):
 
     s = ezra.settings
     if role_id == "race_strategy" and s.snowflake_account:
+        # Snowflake = historical race results (time-travel warehouse).
         return snowflake_connector_from_settings(
             s, f"{s.snowflake_database}.{s.snowflake_schema}.RACE_RESULTS", topics=["strategy"]
         )
     if role_id == "aero_rd" and s.bigquery_project:
-        table = f"{s.bigquery_project}.{s.bigquery_dataset}.race_results"
+        # BigQuery = engineering/aero analytics — aero_rd's own domain.
+        table = f"{s.bigquery_project}.{s.bigquery_dataset}.aero_configs"
         return bigquery_connector_from_settings(s, table, topics=["aero"])
     return None
 
