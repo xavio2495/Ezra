@@ -75,7 +75,7 @@ curl http://<EXTERNAL_IP>/ezra/health
   use, switch to a GCS backend in `versions.tf`.
 - **Runtime identity** is the existing `ezra-ai-developer` GSA (swap via the
   `runtime_gsa_email` variable). The KSA `ezra/ezra-api` impersonates it.
-- **HANDOFF.md** Session 6 mentions Cloud Run; the chosen production target is
-  GKE (recorded in `MEMORY.md`). This tree builds for GKE.
+- **`claude-docs/HANDOFF.md`** Session 6 mentions Cloud Run; the chosen production target is
+  GKE (recorded in `claude-docs/MEMORY.md`). This tree builds for GKE.
 - The demo agents (GEAP Agent Runtime) are out of scope here — this deploys
   Ezra Core (the REST API + tiers). Add agent-runtime wiring in Session 6.

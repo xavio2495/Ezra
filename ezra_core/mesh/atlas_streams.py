@@ -1,7 +1,7 @@
 """Atlas Stream Processing connector — live telemetry via MongoDB MCP's
 ``atlas-streams-*`` tools.
 
-This is the partner-track piece (`docs/product-concept.md`): telemetry time-series
+This is the partner-track piece (`claude-docs/product-concept.md`): telemetry time-series
 flow through **Atlas Stream Processing**, and Ezra reaches them via MongoDB MCP's
 ``atlas-streams-{build,discover,manage,teardown}`` tool surface. A stream
 *processor* reads a source (Kafka / change stream), runs an aggregation pipeline,
