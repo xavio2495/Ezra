@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Callable, Optional
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel
 
+from ezra_core.audit.store import AuditLog
 from ezra_core.belief.branching import BranchManager, ForwardStep
 from ezra_core.belief.checker import ContradictionChecker
 from ezra_core.belief.replay import reconstruct_state_at_turn, snapshot_now
@@ -142,6 +143,7 @@ def create_app(
     router: Optional[Router] = None,
     forward_step: Optional[ForwardStep] = None,
     service_factory: Optional[ServiceFactory] = None,
+    audit_log: Optional[AuditLog] = None,
     bearer_token: Optional[str] = None,
 ) -> FastAPI:
     app = FastAPI(title="Ezra", version="0.1.0")
@@ -162,6 +164,7 @@ def create_app(
             "branching": branch_manager is not None,
             "router": router is not None,
             "service": service_factory is not None,
+            "audit": audit_log is not None,
         }
 
     @app.post("/ezra/context/assemble", dependencies=guarded)
@@ -249,6 +252,19 @@ def create_app(
             )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/ezra/audit", dependencies=guarded)
+    async def audit(session_graph_id: str, limit: int = 100) -> dict:
+        """The session graph's activity feed — everything its agents did
+        (spawns, fetches, commits, contradictions + reconciliations, denials,
+        reverts/rewinds), oldest-first. Empty when no audit log is configured."""
+        if audit_log is None:
+            return {"session_graph_id": session_graph_id, "events": []}
+        events = await audit_log.get_for_graph(session_graph_id, limit=limit)
+        return {
+            "session_graph_id": session_graph_id,
+            "events": [e.model_dump(mode="json") for e in events],
+        }
 
     @app.post("/ezra/replay", dependencies=guarded)
     async def replay(req: ReplayRequest) -> BeliefSnapshot:

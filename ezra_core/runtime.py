@@ -27,6 +27,7 @@ from __future__ import annotations
 from typing import Optional
 
 from ezra_core.adk_service.service import EzraService
+from ezra_core.audit.store import AuditLog
 from ezra_core.belief.branching import BranchManager
 from ezra_core.belief.checker import ContradictionChecker
 from ezra_core.belief.store import BeliefStore
@@ -64,6 +65,7 @@ class Ezra:
         lifecycle: Optional[LifecycleMetaAgent] = None,
         tracer: Optional[EzraTracer] = None,
         parser=None,
+        audit_log: Optional[AuditLog] = None,
         closers: tuple = (),
     ) -> None:
         self.settings = settings
@@ -81,6 +83,8 @@ class Ezra:
         self.tracer = tracer or EzraTracer.disabled()
         # Step-1 intent parser (drives intent-driven fetch); None disables it.
         self.parser = parser
+        # Activity-feed sink shared by every spawned agent's EzraService.
+        self.audit_log = audit_log
         # Manual-mode contradiction callback, registered via @ezra.on_contradiction.
         # Threaded into every agent's EzraService; the reconciler awaits it for
         # `manual` graphs (up to manual_resolution_timeout_seconds).
@@ -148,6 +152,10 @@ class Ezra:
 
         parser = parser_from_settings(settings)
 
+        from ezra_core.audit.store import MongoAuditLog
+
+        audit_log = MongoAuditLog(client, settings.mongodb_db)
+
         return cls(
             settings=settings,
             graph_store=graph_store,
@@ -162,6 +170,7 @@ class Ezra:
             lifecycle=lifecycle,
             tracer=tracer,
             parser=parser,
+            audit_log=audit_log,
             # Closed in order on aclose(); Redis/Qdrant clients expose aclose().
             closers=(cold, hot._r, qdrant),
         )
@@ -271,7 +280,7 @@ class Ezra:
             if changed:
                 await self.graph_store.save(graph.record)
 
-        return EzraService(
+        service = EzraService(
             session_graph_id=graph.session_graph_id,
             agent_id=agent_id,
             permission_scope=permission_scope,
@@ -289,7 +298,10 @@ class Ezra:
             manual_resolution_timeout_seconds=self.settings.manual_resolution_timeout_seconds,
             trust_for=trust_for,
             on_reconciled=on_reconciled,
+            audit_log=self.audit_log,
         )
+        await service._record("agent_spawned", role=role, scope=permission_scope)
+        return service
 
     # -- meta-agents ------------------------------------------------------ #
     async def run_lifecycle_tick(self, session_graph_id: str):

@@ -61,6 +61,7 @@ def build_app():
             policy=ezra.policy,
             merge_strategy=settings.default_merge_strategy,
             manual_resolution_timeout_seconds=settings.manual_resolution_timeout_seconds,
+            audit_log=ezra.audit_log,
         )
 
     return create_app(
@@ -69,6 +70,7 @@ def build_app():
         branch_manager=ezra.branch_manager,
         policy=ezra.policy,
         service_factory=service_factory,
+        audit_log=ezra.audit_log,
         bearer_token=token,
     )
 

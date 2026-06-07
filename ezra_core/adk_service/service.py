@@ -17,6 +17,7 @@ from typing import Any, Awaitable, Callable, Optional, Sequence
 
 from pydantic import BaseModel
 
+from ezra_core.audit.store import AuditLog
 from ezra_core.belief.branching import BranchManager
 from ezra_core.belief.checker import ContradictionChecker
 from ezra_core.belief.history import revert_commitment, rewind_to_turn
@@ -29,7 +30,7 @@ from ezra_core.belief.reconciler import (
 from ezra_core.belief.replay import reconstruct_state_at_turn, snapshot_now
 from ezra_core.belief.store import BeliefStore
 from ezra_core.mesh.base import BaseConnector
-from ezra_core.policy.engine import PolicyEngine
+from ezra_core.policy.engine import PolicyDeniedError, PolicyEngine
 from ezra_core.router import Router, TurnResult, write_back
 from ezra_core.schemas.belief import (
     BeliefSnapshot,
@@ -77,6 +78,7 @@ class EzraService:
         on_reconciled: Optional[
             Callable[[Contradiction, Resolution], Awaitable[None]]
         ] = None,
+        audit_log: Optional[AuditLog] = None,
     ) -> None:
         self.session_graph_id = session_graph_id
         self.agent_id = agent_id
@@ -99,6 +101,8 @@ class EzraService:
         self._trust_for = trust_for or (lambda agent_id, topic: 1.0)
         # Post-reconciliation hook (learning meta-agent damps trust); no-op if None.
         self._on_reconciled = on_reconciled
+        # Activity-feed sink; events are written best-effort, never blocking.
+        self._audit = audit_log
 
     @property
     def _scope(self) -> set[str]:
@@ -113,6 +117,31 @@ class EzraService:
             permission_scope=self.permission_scope,
             spawned_at=datetime.now(timezone.utc),
         )
+
+    async def _record(self, event_type: str, *, topic: str = "", **detail: Any) -> None:
+        """Append one activity-feed event. Best-effort: a logging failure must
+        never break the operation that produced it."""
+        if self._audit is None:
+            return
+        from datetime import datetime, timezone
+        from uuid import uuid4
+
+        from ezra_core.schemas.audit import AuditEvent
+
+        try:
+            await self._audit.append(
+                AuditEvent(
+                    id=uuid4().hex,
+                    session_graph_id=self.session_graph_id,
+                    agent_id=self.agent_id,
+                    event_type=event_type,  # type: ignore[arg-type]
+                    topic=topic,
+                    detail=detail,
+                    created_at=datetime.now(timezone.utc),
+                )
+            )
+        except Exception:
+            pass
 
     async def recall(self, query: str, *, limit: int = 5) -> list[WarmSummary]:
         if self._warm is None:
@@ -241,6 +270,27 @@ class EzraService:
         if contradiction is not None and resolution is not None and self._on_reconciled:
             await self._on_reconciled(contradiction, resolution)
 
+        # Activity feed: the commit, and (if one fired) the detected contradiction
+        # + how it reconciled.
+        await self._record(
+            "belief_committed", topic=topic, claim=claim, commitment_id=commitment.id,
+            turn_index=turn_index, trust_score=trust_score,
+        )
+        if contradiction is not None:
+            await self._record(
+                "contradiction_detected", topic=topic, new_claim=claim,
+                with_agent=contradiction.existing_agent_id,
+                similarity=contradiction.similarity_score,
+                nli_confidence=contradiction.nli_confidence,
+            )
+            if resolution is not None:
+                await self._record(
+                    "contradiction_reconciled", topic=topic,
+                    decision=resolution.decision,
+                    strategy=resolution.merge_strategy_used,
+                    with_agent=contradiction.existing_agent_id,
+                )
+
         return CommitResult(
             commitment=commitment, contradiction=contradiction, resolution=resolution
         )
@@ -251,7 +301,7 @@ class EzraService:
         """Git-revert a single commitment: drop it from the active belief state by
         appending an append-only ``revert`` marker (history is preserved). Returns
         the marker commitment."""
-        return await revert_commitment(
+        marker = await revert_commitment(
             self._belief,
             session_graph_id=self.session_graph_id,
             commitment_id=commitment_id,
@@ -259,28 +309,55 @@ class EzraService:
             reason=reason,
             turn_index=turn_index,
         )
+        await self._record(
+            "belief_reverted", commitment_id=commitment_id, reason=reason,
+            marker_id=marker.id,
+        )
+        return marker
 
     async def rewind(self, turn: int, *, reason: str) -> RewindResult:
         """Rewind the live graph to its as-of-``turn`` belief state (append-only):
         undo every commitment made after ``turn`` and restore the ones a now-undone
         commitment had superseded. History stays intact and replayable."""
-        return await rewind_to_turn(
+        result = await rewind_to_turn(
             self._belief,
             session_graph_id=self.session_graph_id,
             turn=turn,
             by_agent=self.agent_id,
             reason=reason,
         )
+        await self._record(
+            "belief_rewound", reason=reason, rewound_to_turn=result.rewound_to_turn,
+            undone=len(result.superseded_ids), restored=len(result.reactivated_ids),
+        )
+        return result
 
     async def query(
         self, query: str, *, topics: Sequence[str] = (), as_of=None
     ) -> MeshResult:
         # Policy gates first: an out-of-scope topic is denied regardless of whether
         # a connector exists (the agent must never even learn it could fetch it).
-        self._policy.check_topics(self.permission_scope, topics)
+        try:
+            self._policy.check_topics(self.permission_scope, topics)
+        except PolicyDeniedError as exc:
+            await self._record(
+                "fetch_denied", topic=exc.topic, query=query, scope=self.permission_scope
+            )
+            raise
         if self._mesh is None:
             raise RuntimeError("no mesh connector configured for this agent")
-        return await self._mesh.fetch(query, self.agent_id, self.permission_scope, as_of)
+        result = await self._mesh.fetch(query, self.agent_id, self.permission_scope, as_of)
+        rows = (
+            len(result.data)
+            if isinstance(result.data, list)
+            else (0 if result.data is None else 1)
+        )
+        await self._record(
+            "federated_fetch", topic=(topics[0] if topics else ""),
+            source=result.provenance.source,
+            time_travel_available=result.provenance.time_travel_available, rows=rows,
+        )
+        return result
 
     async def complete(self, user_input: str, *, system_prompt: str = "", **kwargs) -> TurnResult:
         if self._router is None:
