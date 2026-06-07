@@ -1,0 +1,36 @@
+Ezra Core is deploying. 🎉
+
+Release:   {{ .Release.Name }}
+Namespace: {{ .Release.Namespace }}
+Image:     {{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}
+LLM:       {{ .Values.llm.provider }}
+
+1. Wait for the API to become ready:
+     kubectl -n {{ .Release.Namespace }} rollout status deployment/{{ include "ezra.fullname" . }}
+
+2. Reach the API:
+{{- if eq .Values.service.type "LoadBalancer" }}
+     export IP=$(kubectl -n {{ .Release.Namespace }} get svc {{ include "ezra.fullname" . }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+     curl http://$IP/ezra/health
+{{- else if .Values.ingress.enabled }}
+     curl http://{{ .Values.ingress.host }}/ezra/health
+{{- else }}
+     kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "ezra.fullname" . }} 8080:{{ .Values.service.port }}
+     curl http://localhost:8080/ezra/health
+{{- end }}
+
+3. The API bearer token (for /ezra/* calls):
+{{- if eq .Values.secrets.backend "kubernetes" }}
+     kubectl -n {{ .Release.Namespace }} get secret {{ include "ezra.secretName" . }} -o jsonpath='{.data.EZRA_API_BEARER_TOKEN}' | base64 -d
+{{- else }}
+     (managed via your {{ .Values.secrets.backend }} secret backend)
+{{- end }}
+
+{{- if eq .Values.llm.provider "vertex" }}
+
+NOTE: provider=vertex requires Workload Identity — annotate the service account
+with your GSA (serviceAccount.annotations."iam.gke.io/gcp-service-account") and
+grant it roles/aiplatform.user.
+{{- end }}
+
+Docs: https://ezra128.vercel.app/docs/deployment

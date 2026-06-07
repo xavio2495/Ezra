@@ -1,0 +1,107 @@
+# Ezra Core — Helm values. Minimal required input: a MongoDB Atlas URI (secrets)
+# and an LLM choice (llm). Everything else has sane defaults.
+
+# -- The Ezra Core API image. No public image is published yet; point this at an
+# image you've built+pushed (deploy/docker/Dockerfile), or the GHCR image once
+# the publish workflow has run.
+image:
+  repository: ghcr.io/xavio2495/ezra-api
+  tag: "" # defaults to .Chart.appVersion
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# -- Kubernetes ServiceAccount for the API pods. On GKE with Vertex/Secret
+# Manager, add the Workload Identity annotation here, e.g.:
+#   annotations:
+#     iam.gke.io/gcp-service-account: ezra-runtime@PROJECT.iam.gserviceaccount.com
+serviceAccount:
+  create: true
+  name: "" # defaults to the fullname
+  annotations: {}
+
+service:
+  type: LoadBalancer # LoadBalancer | ClusterIP | NodePort
+  port: 80
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: ""
+  tls: false
+  tlsSecretName: ""
+
+# -- Non-secret runtime config.
+config:
+  mongodbDb: ezra
+  tracingEnabled: false
+  # Phoenix/OTLP endpoint, only used when tracingEnabled=true.
+  phoenixEndpoint: ""
+
+# -- Language model. provider=vertex is keyless on GKE (Workload Identity);
+# provider=gemini uses an API key from the secret (note: AI Studio keys are
+# blocked from GCP egress — prefer vertex on GKE).
+llm:
+  provider: vertex # vertex | gemini
+  # Leave model blank to use the provider default
+  # (vertex: vertex_ai/gemini-2.5-flash, gemini: gemini/gemini-3.5-flash).
+  model: ""
+  metaModel: ""
+  embeddingModel: ""
+  vertex:
+    project: "" # required when provider=vertex (your GCP project)
+    location: us-central1
+
+# -- In-cluster Redis (hot tier). Disable and set `url` to use an external Redis.
+redis:
+  enabled: true
+  image: redis:7-alpine
+  url: "" # external redis URL when enabled=false, e.g. redis://my-redis:6379
+
+# -- In-cluster Qdrant (warm tier). Ephemeral by default; enable persistence or
+# point at an external Qdrant for production.
+qdrant:
+  enabled: true
+  image: qdrant/qdrant:latest
+  url: "" # external qdrant URL when enabled=false
+  persistence:
+    enabled: false
+    size: 5Gi
+    storageClass: ""
+
+# -- Secrets. Three backends:
+#   kubernetes      — chart creates a K8s Secret from the values below (portable; default)
+#   existing        — reference a Secret you created (existingSecret), keys must be EZRA_*
+#   gcpSecretManager — GKE Secret Manager add-on (CSI files); needs Workload Identity
+secrets:
+  backend: kubernetes
+  existingSecret: ""
+  # For backend=kubernetes:
+  values:
+    mongodbUri: "" # REQUIRED — your MongoDB Atlas connection string
+    apiBearerToken: "" # blank → generated (preserved across upgrades via lookup)
+    llmApiKey: "" # required only when llm.provider=gemini
+    # Optional Atlas Admin API keys so Ezra auto-allowlists the cluster egress IP:
+    mongodbPublicKey: ""
+    mongodbPrivateKey: ""
+  # For backend=gcpSecretManager:
+  gcpSecretManager:
+    project: ""
+    # Secret ids to mount as files under /mnt/secrets-store (asgi.py loads them).
+    secretIds:
+      - ezra-mongodb-uri
+      - ezra-api-bearer-token
+
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

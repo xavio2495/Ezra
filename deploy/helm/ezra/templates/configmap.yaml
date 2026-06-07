@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "ezra.fullname" . }}-config
+  labels: {{- include "ezra.labels" . | nindent 4 }}
+data:
+  EZRA_REDIS_URL: {{ include "ezra.redisUrl" . | quote }}
+  EZRA_QDRANT_URL: {{ include "ezra.qdrantUrl" . | quote }}
+  EZRA_MONGODB_DB: {{ .Values.config.mongodbDb | quote }}
+  EZRA_API_PORT: "8080"
+  EZRA_TRACING_ENABLED: {{ .Values.config.tracingEnabled | quote }}
+  {{- if and .Values.config.tracingEnabled .Values.config.phoenixEndpoint }}
+  EZRA_PHOENIX_ENDPOINT: {{ .Values.config.phoenixEndpoint | quote }}
+  {{- end }}
+  {{- if eq .Values.llm.provider "vertex" }}
+  EZRA_LLM_MODEL: {{ .Values.llm.model | default "vertex_ai/gemini-2.5-flash" | quote }}
+  EZRA_META_AGENT_MODEL: {{ .Values.llm.metaModel | default "vertex_ai/gemini-2.5-flash" | quote }}
+  EZRA_EMBEDDING_MODEL: {{ .Values.llm.embeddingModel | default "vertex_ai/text-embedding-005" | quote }}
+  GOOGLE_GENAI_USE_VERTEXAI: "true"
+  GOOGLE_CLOUD_PROJECT: {{ required "llm.vertex.project is required when llm.provider=vertex" .Values.llm.vertex.project | quote }}
+  GOOGLE_CLOUD_LOCATION: {{ .Values.llm.vertex.location | quote }}
+  VERTEXAI_PROJECT: {{ .Values.llm.vertex.project | quote }}
+  VERTEXAI_LOCATION: {{ .Values.llm.vertex.location | quote }}
+  {{- else }}
+  EZRA_LLM_MODEL: {{ .Values.llm.model | default "gemini/gemini-3.5-flash" | quote }}
+  EZRA_META_AGENT_MODEL: {{ .Values.llm.metaModel | default "gemini/gemini-3.5-flash" | quote }}
+  EZRA_EMBEDDING_MODEL: {{ .Values.llm.embeddingModel | default "gemini/gemini-embedding-001" | quote }}
+  {{- end }}

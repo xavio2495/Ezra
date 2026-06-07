@@ -61,11 +61,14 @@
 		</p>
 
 		<div class="hero-install">
-			<code><span class="kw">pip install</span> ezra-platform</code>
+			<code><span class="kw">curl</span> -fsSL https://ezra128.vercel.app/install.sh | bash</code>
 			<button
 				class="hi-copy"
-				onclick={(e) => copyText('pip install ezra-platform', e.currentTarget as HTMLButtonElement)}
-				>Copy</button
+				onclick={(e) =>
+					copyText(
+						'curl -fsSL https://ezra128.vercel.app/install.sh | bash',
+						e.currentTarget as HTMLButtonElement
+					)}>Copy</button
 			>
 		</div>
 

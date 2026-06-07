@@ -1,6 +1,34 @@
 # Deployment
 
-Ezra Core and the agent fleet deploy on **Google Kubernetes Engine (GKE)**, keyless via Workload Identity Federation. (The original plan named Cloud Run; GKE was chosen to fit the dynamically-spawning multi-agent fleet, the Secret Manager CSI driver, and keyless WIF.)
+Ezra Core and the agent fleet deploy on **Google Kubernetes Engine (GKE)**, keyless via Workload Identity Federation. (The original plan named Cloud Run; GKE was chosen to fit the dynamically-spawning multi-agent fleet, the Secret Manager CSI driver, and keyless WIF.) Three ways to stand it up, fastest first.
+
+## 1. One-command installer
+
+An interactive script that detects your environment and sets up either local dev or a full GKE deploy (it creates the runtime service account, provisions the foundation, builds + pushes the image, and — after a cost confirmation — creates the cluster and deploys):
+
+```bash
+curl -fsSL https://ezra128.vercel.app/install.sh | bash
+```
+
+It's `curl|bash`-safe (prompts read from your terminal), needs no public image (it builds yours), and never creates billable resources without an explicit yes.
+
+## 2. Helm
+
+If you already have a cluster, install the chart directly:
+
+```bash
+helm install ezra ./deploy/helm/ezra --namespace ezra --create-namespace \
+  --set image.repository=YOUR_REGISTRY/ezra-api \
+  --set llm.provider=gemini \
+  --set secrets.values.mongodbUri='mongodb+srv://…' \
+  --set secrets.values.llmApiKey='…'
+```
+
+The chart bundles Redis + Qdrant (toggle off to use external), supports portable Kubernetes secrets or the GKE Secret Manager CSI path, and Vertex (keyless) or an API-key LLM. See `deploy/helm/README.md` for the full values surface.
+
+## 3. Terraform + kustomize (manual)
+
+The lowest-level path — `deploy/terraform/` for the GCP foundation + cluster, `deploy/k8s/` for the manifests, driven by the scripts in `deploy/scripts/`. See `deploy/README.md`.
 
 ## Topology
 

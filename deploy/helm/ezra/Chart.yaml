@@ -1,0 +1,21 @@
+apiVersion: v2
+name: ezra
+description: >-
+  Ezra — enterprise multi-agent platform. This chart deploys Ezra Core (the REST
+  API + Redis hot tier + Qdrant warm tier). The cold tier is MongoDB Atlas
+  (managed, external) — supply its URI via a secret.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://ezra128.vercel.app
+sources:
+  - https://github.com/xavio2495/ezra
+keywords:
+  - ai
+  - agents
+  - multi-agent
+  - memory
+  - beliefs
+  - mongodb
+maintainers:
+  - name: the Ezra authors

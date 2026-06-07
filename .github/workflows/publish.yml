@@ -1,0 +1,77 @@
+# Publish a PUBLIC Ezra Core image + the Helm chart to GitHub Container Registry
+# (GHCR) on a version tag. This is separate from deploy.yml (which deploys the
+# private GKE image). Auth is the built-in GITHUB_TOKEN — no GCP needed.
+#
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# Consumers then:
+#   docker pull ghcr.io/<owner>/ezra-api:0.1.0
+#   helm install ezra oci://ghcr.io/<owner>/charts/ezra --version 0.1.0
+name: publish
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish (e.g. 0.1.0)"
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve version
+        id: v
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build & push ezra-api
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/ezra-api:${{ steps.v.outputs.version }}
+            ghcr.io/${{ github.repository_owner }}/ezra-api:latest
+
+  chart:
+    runs-on: ubuntu-latest
+    needs: image
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.3
+      - name: Resolve version
+        id: v
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Package + push chart to GHCR (OCI)
+        run: |
+          VER="${{ steps.v.outputs.version }}"
+          helm registry login ghcr.io -u "${{ github.actor }}" -p "${{ secrets.GITHUB_TOKEN }}"
+          helm package deploy/helm/ezra --version "$VER" --app-version "$VER"
+          helm push "ezra-${VER}.tgz" "oci://ghcr.io/${{ github.repository_owner }}/charts"

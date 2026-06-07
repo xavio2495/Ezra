@@ -634,6 +634,8 @@ footer {
   color: var(--fg);
   letter-spacing: 0.02em;
   white-space: nowrap;
+  overflow-x: auto;
+  min-width: 0;
 }
 .hero-install code .kw { color: var(--accent); }
 .hero-install .hi-copy {
