@@ -76,3 +76,11 @@ variable "node_count" {
   type    = number
   default = 1
 }
+
+# F1-demo-only BigQuery bindings (jobUser + dataEditor on the `formula_1` dataset).
+# Off by default so `terraform apply` succeeds on a fresh project that has no such
+# dataset; the F1 demo flips it true. Generic adopters leave it false.
+variable "enable_demo_bigquery" {
+  type    = bool
+  default = false
+}

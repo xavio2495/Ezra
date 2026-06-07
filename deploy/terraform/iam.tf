@@ -24,7 +24,9 @@ resource "google_secret_manager_secret_iam_member" "secret_accessor" {
 
 # The ingest job (running as the runtime GSA via WI) runs BigQuery jobs.
 # bigquery.jobUser lets it run query/load jobs billed to this project.
+# F1-demo only — gated so a generic project applies cleanly.
 resource "google_project_iam_member" "runtime_bigquery_job_user" {
+  count   = var.enable_demo_bigquery ? 1 : 0
   project = var.project_id
   role    = "roles/bigquery.jobUser"
   member  = "serviceAccount:${var.runtime_gsa_email}"
@@ -32,8 +34,10 @@ resource "google_project_iam_member" "runtime_bigquery_job_user" {
 
 # Writing the F1 results table needs table create/write — granted at the DATASET
 # level (least privilege; not project-wide). jobUser runs the job, this lets it
-# create/replace + load the table inside formula_1.
+# create/replace + load the table inside formula_1. F1-demo only — gated, since the
+# `formula_1` dataset only exists in the demo project (this would error elsewhere).
 resource "google_bigquery_dataset_iam_member" "runtime_dataset_editor" {
+  count      = var.enable_demo_bigquery ? 1 : 0
   project    = var.project_id
   dataset_id = "formula_1"
   role       = "roles/bigquery.dataEditor"
