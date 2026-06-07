@@ -125,31 +125,38 @@
 				<div class="ts-n">1</div>
 				<div>
 					<div class="ts-label">Install</div>
-					<div class="ts-code"><span class="kw">pip install</span> ezra-platform</div>
-				</div>
-				<button
-					class="cp-btn"
-					onclick={(e) =>
-						copyText('pip install ezra-platform', e.currentTarget as HTMLButtonElement)}
-					>Copy</button
-				>
-			</div>
-
-			<div class="terminal-step">
-				<div class="ts-n">2</div>
-				<div>
-					<div class="ts-label">Configure</div>
 					<div class="ts-code">
-						<span class="kw">from</span> ezra_core <span class="kw">import</span> Ezra ezra =
-						Ezra.from_env( session_graph_id=<span class="str">"my-session"</span>
-						)
+						<span class="kw">curl</span> -fsSL https://ezra128.vercel.app/install.sh | bash
 					</div>
 				</div>
 				<button
 					class="cp-btn"
 					onclick={(e) =>
 						copyText(
-							`from ezra_core import Ezra\nezra = Ezra.from_env(session_graph_id="my-session")`,
+							'curl -fsSL https://ezra128.vercel.app/install.sh | bash',
+							e.currentTarget as HTMLButtonElement
+						)}>Copy</button
+				>
+			</div>
+
+			<div class="terminal-step">
+				<div class="ts-n">2</div>
+				<div>
+					<div class="ts-label">Spawn an agent</div>
+					<div class="ts-code">
+						<span class="kw">from</span> ezra_core.runtime <span class="kw">import</span> Ezra ezra
+						= Ezra.from_env() graph = <span class="kw">await</span>
+						ezra.create_session_graph(session_graph_id=<span class="str">"race-weekend"</span>) svc
+						= <span class="kw">await</span> ezra.spawn_agent(graph, agent_id=<span class="str"
+							>"strategist"</span
+						>, permission_scope=[<span class="str">"tyres"</span>])
+					</div>
+				</div>
+				<button
+					class="cp-btn"
+					onclick={(e) =>
+						copyText(
+							`from ezra_core.runtime import Ezra\nezra = Ezra.from_env()\ngraph = await ezra.create_session_graph(session_graph_id="race-weekend")\nsvc = await ezra.spawn_agent(graph, agent_id="strategist", permission_scope=["tyres"])`,
 							e.currentTarget as HTMLButtonElement
 						)}>Copy</button
 				>
@@ -158,23 +165,20 @@
 			<div class="terminal-step">
 				<div class="ts-n">3</div>
 				<div>
-					<div class="ts-label">Run</div>
+					<div class="ts-label">Run a turn</div>
 					<div class="ts-code">
-						response = <span class="kw">await</span> ezra.complete( agent_id=<span class="str"
-							>"supply_chain"</span
-						>, permission_scope=[<span class="str">"inventory"</span>,
-						<span class="str">"logistics"</span>], messages=[&#123;<span class="str">"role"</span>:
-						<span class="str">"user"</span>, <span class="str">"content"</span>:
-						<span class="str">"..."</span>&#125;], sources=[<span class="str"
-							>"mongodb://cluster/inventory"</span
-						>], )
+						result = <span class="kw">await</span> svc.complete(<span class="str"
+							>"What tyre for the final stint?"</span
+						>) <span class="kw">print</span>(result.response)
 					</div>
 				</div>
 				<button
 					class="cp-btn"
 					onclick={(e) =>
-						copyText('response = await ezra.complete(...)', e.currentTarget as HTMLButtonElement)}
-					>Copy</button
+						copyText(
+							`result = await svc.complete("What tyre for the final stint?")\nprint(result.response)`,
+							e.currentTarget as HTMLButtonElement
+						)}>Copy</button
 				>
 			</div>
 		</div>

@@ -147,23 +147,13 @@
 				<h2>Install Ezra</h2>
 			</div>
 
-			<p>Install the platform with the ADK extension:</p>
-
-			<div class="qs-code-wrap">
-				<div class="qs-code-bar">
-					<span>bash</span>
-					<button
-						onclick={(e) =>
-							copyText('pip install "ezra-platform[adk]"', e.currentTarget as HTMLButtonElement)}
-						>Copy</button
-					>
-				</div>
-				<pre class="qs-code"><span class="kw">pip install</span> <span class="str"
-						>"ezra-platform[adk]"</span
-					></pre>
-			</div>
-
-			<p>Verify the installation:</p>
+			<p>
+				Ezra isn't on PyPI yet — clone the repo and sync with <a
+					href="https://docs.astral.sh/uv/"
+					target="_blank"
+					rel="noopener">uv</a
+				> (or run the one-command installer, which does this for you):
+			</p>
 
 			<div class="qs-code-wrap">
 				<div class="qs-code-bar">
@@ -171,15 +161,20 @@
 					<button
 						onclick={(e) =>
 							copyText(
-								'python -c "import ezra_core; print(ezra_core.__version__)"',
+								'git clone https://github.com/xavio2495/Ezra.git && cd Ezra && uv sync --frozen --group agents',
 								e.currentTarget as HTMLButtonElement
 							)}>Copy</button
 					>
 				</div>
-				<pre class="qs-code"><span class="kw">python</span> -c <span class="str"
-						>"import ezra_core; print(ezra_core.__version__)"</span
-					>
-<span class="cm"># Expected: 0.1.0</span></pre>
+				<pre class="qs-code"><span class="kw">git clone</span> https://github.com/xavio2495/Ezra.git
+<span class="kw">cd</span> Ezra
+uv sync --frozen --group agents   <span class="cm"># google-adk + connectors</span></pre>
+			</div>
+
+			<div class="qs-callout teal">
+				<span class="qs-callout-label">// Shortcut</span>
+				The installer does the clone + setup interactively:
+				<code>curl -fsSL https://ezra128.vercel.app/install.sh | bash</code>
 			</div>
 		</section>
 
@@ -284,63 +279,74 @@ EZRA_LOG_LEVEL=<span class="str">INFO</span></pre>
 			</div>
 
 			<p>
-				Create a simple ADK agent that uses Ezra for memory recall and belief tracking. This pattern
-				wraps any Google ADK agent with the <code>EzraService</code> adapter.
+				Spawn a scope-bound agent and drive it from a Google ADK agent. Ezra registers as an ADK
+				<code>EzraToolset</code> (recall · query · commit · snapshot · rewind · replay · branch), so the
+				agent calls Ezra through normal tool use.
 			</p>
 
 			<div class="qs-code-wrap">
 				<div class="qs-code-bar">
 					<span>agent.py</span>
-					<button onclick={(e) => copyText('', e.currentTarget as HTMLButtonElement)}>Copy</button>
+					<button
+						onclick={(e) =>
+							copyText(
+								'import asyncio\nfrom ezra_core.runtime import Ezra\nfrom ezra_core.adk_service import EzraToolset\nfrom google.adk.agents import Agent\nfrom google.adk.runners import Runner\nfrom google.adk.sessions import InMemorySessionService\nfrom google.genai import types\n\n\nasync def main():\n    ezra = Ezra.from_env()\n    graph = await ezra.create_session_graph(session_graph_id="demo-fleet")\n    svc = await ezra.spawn_agent(\n        graph, agent_id="analyst", permission_scope=["market_data", "reports"],\n    )\n\n    agent = Agent(\n        name="analyst",\n        model="gemini-2.5-flash",\n        instruction="Analyse market data; record durable findings with commit_belief.",\n        tools=[EzraToolset(svc)],\n    )\n    sessions = InMemorySessionService()\n    await sessions.create_session(app_name="ezra", user_id="team", session_id="s1")\n    runner = Runner(app_name="ezra", agent=agent, session_service=sessions)\n\n    msg = types.Content(role="user", parts=[types.Part(text="Summarise Q1 revenue and flag anomalies.")])\n    async for event in runner.run_async(user_id="team", session_id="s1", new_message=msg):\n        if event.is_final_response():\n            print(event.content.parts[0].text)\n\n    await ezra.aclose()\n\n\nasyncio.run(main())',
+								e.currentTarget as HTMLButtonElement
+							)}>Copy</button
+					>
 				</div>
 				<pre class="qs-code"><span class="kw">import</span> asyncio
-<span class="kw">from</span> dotenv <span class="kw">import</span> load_dotenv
-<span class="kw">from</span> ezra.adk_service <span class="kw">import</span> EzraService
-<span class="kw">from</span> google.adk.agents <span class="kw">import</span> LlmAgent
+<span class="kw">from</span> ezra_core.runtime <span class="kw">import</span> Ezra
+<span class="kw">from</span> ezra_core.adk_service <span class="kw">import</span> EzraToolset
+<span class="kw">from</span> google.adk.agents <span class="kw">import</span> Agent
+<span class="kw">from</span> google.adk.runners <span class="kw">import</span> Runner
+<span class="kw">from</span> google.adk.sessions <span class="kw">import</span
+					> InMemorySessionService
+<span class="kw">from</span> google.genai <span class="kw">import</span> types
 
-load_dotenv()
-
-<span class="cm"># Initialise Ezra — connects to Redis (hot tier) and MongoDB (cold tier)</span>
-ezra = EzraService(
-    session_graph_id=<span class="str">"demo-fleet"</span>,
-    project=<span class="str">"my-project-id"</span>,
-    location=<span class="str">"us-central1"</span>,
-)
-
-<span class="kw">class</span> <span class="fn">AnalystAgent</span>(LlmAgent):
-    <span class="str">"""An ADK agent with Ezra memory and belief tracking."""</span>
-
-    agent_id = <span class="str">"analyst"</span>
-    permission_scope = [<span class="str">"market_data"</span>, <span class="str">"reports"</span>]
-
-    <span class="kw">async def</span> <span class="fn">before_model_call</span>(self, ctx):
-        <span class="cm"># Hydrate memory from all three tiers (hot → warm → cold)</span>
-        memory = <span class="kw">await</span> ezra.recall(
-            agent_id=self.agent_id,
-            scope=self.permission_scope,
-        )
-        ctx.inject_memory(memory)
-
-    <span class="kw">async def</span> <span class="fn">after_model_call</span>(self, ctx, response):
-        <span class="cm"># Commit any beliefs the agent asserted</span>
-        <span class="kw">await</span> ezra.commit(
-            agent_id=self.agent_id,
-            beliefs=response.asserted_beliefs,
-            sources=ctx.sources_used,
-        )
 
 <span class="kw">async def</span> <span class="fn">main</span>():
-    agent = AnalystAgent(model=<span class="str">"gemini-3.5-flash"</span>)
+    <span class="cm"
+						># Shared runtime: Redis (hot) + Qdrant (warm) + MongoDB Atlas (cold) + LLM.</span
+					>
+    ezra = Ezra.from_env()
+    graph = <span class="kw">await</span> ezra.create_session_graph(session_graph_id=<span
+						class="str">"demo-fleet"</span
+					>)
 
-    result = <span class="kw">await</span> agent.run(
-        prompt=<span class="str">"Summarise Q1 2026 revenue trends and flag any anomalies."</span>,
-        sources=[<span class="str">"mongodb://cluster/financials"</span>],
+    <span class="cm"># A scope-bound agent handle.</span>
+    svc = <span class="kw">await</span> ezra.spawn_agent(
+        graph, agent_id=<span class="str">"analyst"</span>, permission_scope=[<span class="str"
+						>"market_data"</span
+					>, <span class="str">"reports"</span>],
     )
 
-    print(result.content)
-    print(<span class="str">f"\nBelief snapshot ID: </span>&#123;result.belief_id&#125;<span
-						class="str">"</span
-					>)
+    <span class="cm"># Drive it from Google ADK — Ezra is registered as a toolset.</span>
+    agent = Agent(
+        name=<span class="str">"analyst"</span>,
+        model=<span class="str">"gemini-2.5-flash"</span>,
+        instruction=<span class="str"
+						>"Analyse market data; record findings with commit_belief."</span
+					>,
+        tools=[EzraToolset(svc)],
+    )
+    sessions = InMemorySessionService()
+    <span class="kw">await</span> sessions.create_session(app_name=<span class="str">"ezra"</span
+					>, user_id=<span class="str">"team"</span>, session_id=<span class="str">"s1"</span>)
+    runner = Runner(app_name=<span class="str">"ezra"</span>, agent=agent, session_service=sessions)
+
+    msg = types.Content(role=<span class="str">"user"</span>, parts=[types.Part(text=<span
+						class="str">"Summarise Q1 revenue and flag anomalies."</span
+					>)])
+    <span class="kw">async for</span> event <span class="kw">in</span
+					> runner.run_async(user_id=<span class="str">"team"</span>, session_id=<span class="str"
+						>"s1"</span
+					>, new_message=msg):
+        <span class="kw">if</span> event.is_final_response():
+            print(event.content.parts[<span class="str">0</span>].text)
+
+    <span class="kw">await</span> ezra.aclose()
+
 
 asyncio.run(main())</pre>
 			</div>
@@ -396,13 +402,16 @@ asyncio.run(main())</pre>
 				</div>
 				<pre class="qs-code">curl -X POST http://localhost:8080/ezra/belief/snapshot \
   -H <span class="str">"Content-Type: application/json"</span> \
-  -d <span class="str">'&#123;"agent_id": "analyst", "session": "demo-fleet"&#125;'</span></pre>
+  -H <span class="str">"Authorization: Bearer $EZRA_API_BEARER_TOKEN"</span> \
+  -d <span class="str"
+						>'&#123;"session_graph_id": "demo-fleet", "permission_scope": ["market_data"]&#125;'</span
+					></pre>
 			</div>
 
 			<div class="qs-callout teal">
 				<span class="qs-callout-label">// Expected output</span>
-				A JSON snapshot with <code>belief_id</code>, <code>timestamp</code>, all committed facts,
-				and their attributed sources. This is your audit record.
+				The active belief state — every commitment with its agent, claim, topic, and typed provenance.
+				This is your queryable, replayable audit record.
 			</div>
 		</section>
 

@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 
 	let currentSlide = $state(0);
-	const TOTAL = 8;
+	const TOTAL = 6;
 
 	function goTo(n: number) {
 		currentSlide = n;
@@ -190,89 +190,10 @@
 		</div>
 	</section>
 
-	<!-- 5: Market -->
-	<section class="slide slide-teal" data-slide="5">
+	<!-- 5: The Ask -->
+	<section class="slide slide-cover slide-ask" data-slide="5">
 		<div class="slide-inner slide-inner--center">
-			<div class="slide-label">05 / Market</div>
-			<h2>Enterprise AI Infrastructure<br />is <em>exploding.</em></h2>
-			<div class="pitch-market">
-				<div class="pm-stat">
-					<div class="pm-n">$45B</div>
-					<div class="pm-l">Enterprise GenAI spend by 2027<br /><span>IDC, 2025</span></div>
-				</div>
-				<div class="pm-stat">
-					<div class="pm-n">10+</div>
-					<div class="pm-l">
-						Agents per production system<br /><span>Fortune 500 AI teams, 2026</span>
-					</div>
-				</div>
-				<div class="pm-stat">
-					<div class="pm-n">0</div>
-					<div class="pm-l">
-						Platforms solving memory,<br />audit, and federation together<span></span>
-					</div>
-				</div>
-			</div>
-			<p class="pitch-market-note">
-				The orchestration layer is the durable infrastructure wedge. Ezra occupies it before
-				hyperscalers do.
-			</p>
-		</div>
-	</section>
-
-	<!-- 6: Traction -->
-	<section class="slide" data-slide="6">
-		<div class="slide-inner">
-			<div class="slide-label">06 / Traction</div>
-			<h2><em>Early</em> signals.</h2>
-			<div class="pitch-traction">
-				<div class="pt-item">
-					<div class="pt-icon">▣</div>
-					<div>
-						<h4>Hackathon build — June 15 2026</h4>
-						<p>
-							Full stack: Python runtime, MongoDB Atlas, Google Cloud ADK, SvelteKit front-end.
-							Live-verified on GKE.
-						</p>
-					</div>
-				</div>
-				<div class="pt-item">
-					<div class="pt-icon">▣</div>
-					<div>
-						<h4>Design partners identified</h4>
-						<p>
-							Three Fortune 500 AI platform teams have expressed early interest in the compliance
-							and belief audit capability.
-						</p>
-					</div>
-				</div>
-				<div class="pt-item">
-					<div class="pt-icon">▣</div>
-					<div>
-						<h4>Open source from day one</h4>
-						<p>
-							MIT-licensed core drives adoption. Enterprise tier adds OIDC auth, SLA, and dedicated
-							support.
-						</p>
-					</div>
-				</div>
-				<div class="pt-item">
-					<div class="pt-icon">▣</div>
-					<div>
-						<h4>P50 latency validated</h4>
-						<p>
-							8-step router benchmarked at &lt;40ms P50 on GKE with Redis + Qdrant + MongoDB Atlas.
-						</p>
-					</div>
-				</div>
-			</div>
-		</div>
-	</section>
-
-	<!-- 7: Ask -->
-	<section class="slide slide-cover slide-ask" data-slide="7">
-		<div class="slide-inner slide-inner--center">
-			<div class="slide-label">07 / The Ask</div>
+			<div class="slide-label">05 / The Ask</div>
 			<h2>Join the<br /><em>early access</em><br />program.</h2>
 			<p class="slide-ask-p">
 				We are looking for two or three enterprise AI teams to co-build the production version. In
@@ -288,7 +209,7 @@
 			<div class="slide-ask-meta">
 				<span>field@ezra.dev</span>
 				<span>·</span>
-				<span>github.com/ezra-runtime</span>
+				<span>github.com/xavio2495/Ezra</span>
 				<span>·</span>
 				<span>v0.1.0 · MIT</span>
 			</div>
@@ -629,100 +550,6 @@
 		line-height: 1.6;
 	}
 
-	/* ── Market ── */
-	.pitch-market {
-		display: grid;
-		grid-template-columns: repeat(3, 1fr);
-		gap: 0;
-		border: 1px solid var(--line);
-		margin: 24px 0;
-	}
-	.pm-stat {
-		padding: 40px 32px;
-		border-left: 1px solid var(--line);
-		text-align: center;
-	}
-	.pm-stat:first-child {
-		border-left: 0;
-	}
-	.pm-n {
-		font-family: var(--f-display);
-		font-style: italic;
-		font-size: 56px;
-		color: var(--accent);
-		line-height: 1;
-		margin-bottom: 12px;
-	}
-	.pm-l {
-		font-family: var(--f-mono);
-		font-size: 11px;
-		letter-spacing: 0.14em;
-		text-transform: uppercase;
-		color: var(--fg-3);
-		line-height: 1.6;
-	}
-	.pm-l span {
-		display: block;
-		color: var(--fg-4);
-		margin-top: 4px;
-		font-size: 10px;
-	}
-	.pitch-market-note {
-		font-family: var(--f-display);
-		font-style: italic;
-		font-size: 20px;
-		color: var(--fg-2);
-		text-align: center;
-		max-width: 60ch;
-		margin: 0 auto;
-		line-height: 1.4;
-	}
-
-	/* ── Traction ── */
-	.pitch-traction {
-		display: flex;
-		flex-direction: column;
-		gap: 0;
-		border: 1px solid var(--line);
-		margin-top: 8px;
-	}
-	.pt-item {
-		display: grid;
-		grid-template-columns: 44px 1fr;
-		gap: 20px;
-		padding: 24px 28px;
-		border-bottom: 1px solid var(--line);
-		align-items: start;
-		transition: background 0.2s;
-	}
-	.pt-item:last-child {
-		border-bottom: 0;
-	}
-	.pt-item:hover {
-		background: rgba(45, 199, 184, 0.025);
-	}
-	.pt-icon {
-		font-size: 20px;
-		color: var(--accent);
-		line-height: 1;
-		padding-top: 2px;
-	}
-	.pt-item h4 {
-		margin: 0 0 6px;
-		font-family: var(--f-sans);
-		font-weight: 500;
-		font-size: 15px;
-		text-transform: uppercase;
-		letter-spacing: 0.01em;
-		color: var(--fg);
-	}
-	.pt-item p {
-		margin: 0;
-		font-size: 12.5px;
-		color: var(--fg-3);
-		line-height: 1.65;
-	}
-
 	/* ── Ask ── */
 	.slide-ask-p {
 		font-size: 15px;
@@ -806,16 +633,6 @@
 		}
 		.pitch-router {
 			grid-template-columns: repeat(4, 1fr);
-		}
-		.pitch-market {
-			grid-template-columns: 1fr;
-		}
-		.pm-stat {
-			border-left: 0;
-			border-bottom: 1px solid var(--line);
-		}
-		.pm-stat:last-child {
-			border-bottom: 0;
 		}
 		.slide-nav {
 			display: none;
