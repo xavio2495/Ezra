@@ -1,63 +1,99 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import snapshot from '$lib/dashboard-snapshot.json';
 
 	// ---------------------------------------------------------------------------
-	// This is an *illustrative* operations dashboard: a scripted simulation of the
-	// runtime's live state (active agents, three-tier memory, belief
-	// reconciliation, branching replay). It runs entirely client-side — no backend
-	// — to show the shape of what Ezra's live state looks like during a session.
+	// This dashboard renders a REAL recorded run — not a simulation. The data in
+	// $lib/dashboard-snapshot.json is captured verbatim from a live google.adk
+	// fleet executed on GKE (Vertex Gemini agents over Atlas + Snowflake +
+	// BigQuery) by demo/f1_race_weekend/adk_runtime/fleet.py::capture_snapshot.
 	// ---------------------------------------------------------------------------
 
 	type Agent = {
 		id: string;
-		scope: string;
-		born: number;
-		dies: number | null;
+		role: string;
+		scope: string[];
+		committed: boolean;
+		trust_tyres: number | null;
+	};
+	type Belief = {
+		agent: string;
+		topic: string;
+		claim: string;
+		turn: number;
+		trust: number;
+		active: boolean;
+		superseded: boolean;
+	};
+	type Recon = {
+		topic: string;
+		similarity: number | null;
+		nli_confidence: number | null;
+		strategy: string;
+		decision: string;
+		winner: string;
+		loser: string;
+		winner_trust: number | null;
+		loser_trust: number | null;
+	} | null;
+	type Fetch = {
+		agent: string;
+		source: string;
+		time_travel_available: boolean;
+		rows: number;
+	};
+	type Denial = { agent: string; denied_topic: string; scope: string[] } | null;
+	type DivergedTopic = { topic: string; only_in_original: string[]; only_in_branch: string[] };
+	type Branch = { diverged?: DivergedTopic[]; error?: string } | null;
+	type Snapshot = {
+		meta: {
+			recorded_at: string;
+			graph_id: string;
+			inherited_from: string;
+			llm_model: string;
+			sources: string[];
+		};
+		agents: Agent[];
+		tiers: {
+			hot_turns: number;
+			warm_summaries: number;
+			cold_commitments: number;
+			active_beliefs: number;
+			superseded_beliefs: number;
+		};
+		beliefs: Belief[];
+		reconciliation: Recon;
+		federated_fetches: Fetch[];
+		denial: Denial;
+		branch: Branch;
 	};
 
-	// A race-weekend fleet that spawns and terminates as the weekend unfolds.
-	const FLEET: Agent[] = [
-		{ id: 'race_strategy', scope: 'strategy', born: 0, dies: null },
-		{ id: 'tyre_engineer', scope: 'tyres', born: 0, dies: null },
-		{ id: 'telemetry_analyst', scope: 'telemetry', born: 1, dies: 9 },
-		{ id: 'weather_model', scope: 'weather', born: 2, dies: null },
-		{ id: 'aero_rd', scope: 'aero', born: 3, dies: 8 },
-		{ id: 'parts_shortage', scope: 'parts', born: 5, dies: 11 },
-		{ id: 'logistics', scope: 'logistics', born: 4, dies: null },
-		{ id: 'press_officer', scope: 'press', born: 8, dies: null }
-	];
-	const MAX_TICK = 12;
-	const CONTRADICTION_TICK = 6;
+	const snap = snapshot as Snapshot;
 
-	let tick = $state(0);
-	let playing = $state(true);
+	const committedCount = snap.agents.filter((a) => a.committed).length;
+	const recon = snap.reconciliation;
 
-	const activeAgents = $derived(
-		FLEET.filter((a) => a.born <= tick && (a.dies === null || a.dies > tick))
+	const recordedAt = (() => {
+		const d = new Date(snap.meta.recorded_at);
+		return isNaN(d.getTime())
+			? snap.meta.recorded_at
+			: d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+	})();
+
+	// Three-tier counts, scaled to the largest tier so the bars stay honest.
+	const tierMax = Math.max(
+		1,
+		snap.tiers.hot_turns,
+		snap.tiers.warm_summaries,
+		snap.tiers.cold_commitments
 	);
-	const agentCount = $derived(activeAgents.length);
-	const peakCount = $derived(
-		Math.max(
-			...Array.from(
-				{ length: MAX_TICK + 1 },
-				(_, t) => FLEET.filter((a) => a.born <= t && (a.dies === null || a.dies > t)).length
-			)
-		)
-	);
-
-	// Three-tier memory fills as the session runs.
-	const hotTurns = $derived(Math.min(8, 1 + tick)); // capped ring buffer (max_turns)
-	const warmSummaries = $derived(tick * 3);
-	const coldCommitments = $derived(11 + tick * 4);
-
-	const tiers = $derived([
+	const tiers = [
 		{
 			key: 'hot',
 			name: 'Hot tier',
 			store: 'Redis',
-			detail: 'Recent turns · pinned beliefs',
-			value: hotTurns,
-			cap: 8,
+			detail: 'Recent turns',
+			value: snap.tiers.hot_turns,
 			unit: 'turns',
 			color: 'var(--hot)'
 		},
@@ -66,8 +102,7 @@
 			name: 'Warm tier',
 			store: 'Qdrant',
 			detail: 'Compressed summaries · vectors',
-			value: warmSummaries,
-			cap: MAX_TICK * 3,
+			value: snap.tiers.warm_summaries,
 			unit: 'summaries',
 			color: 'var(--warm)'
 		},
@@ -75,102 +110,16 @@
 			key: 'cold',
 			name: 'Cold tier',
 			store: 'MongoDB Atlas',
-			detail: 'Belief store · semantic memory',
-			value: coldCommitments,
-			cap: 11 + MAX_TICK * 4,
+			detail: `${snap.tiers.active_beliefs} active · ${snap.tiers.superseded_beliefs} superseded`,
+			value: snap.tiers.cold_commitments,
 			unit: 'commitments',
 			color: 'var(--cold)'
 		}
-	]);
-
-	// Belief state on topic `tyres` — a contradiction fires mid-session and the
-	// highest-trust reconciler resolves it (tyre_engineer 0.95 > race_strategy 0.80).
-	type Belief = {
-		agent: string;
-		topic: string;
-		claim: string;
-		superseded?: boolean;
-		winner?: boolean;
-	};
-	const fired = $derived(tick >= CONTRADICTION_TICK);
-	const beliefs = $derived<Belief[]>([
-		{ agent: 'weather_model', topic: 'weather', claim: 'Dry through lights-out; 8% rain risk.' },
-		{ agent: 'logistics', topic: 'logistics', claim: 'Freight cleared customs at 14:02.' },
-		{
-			agent: 'race_strategy',
-			topic: 'tyres',
-			claim: 'Start on softs, one-stop.',
-			superseded: fired
-		},
-		...(fired
-			? [
-					{
-						agent: 'tyre_engineer',
-						topic: 'tyres',
-						claim: 'Start on mediums — softs overheat after lap 40.',
-						winner: true
-					}
-				]
-			: [])
-	]);
-
-	// Branching replay — branch from a prior turn, mutate, run forward, diff.
-	type BranchScenario = {
-		turn: number;
-		label: string;
-		mutation: string;
-		diff: { topic: string; original: string; branch: string }[];
-	};
-	const SCENARIOS: BranchScenario[] = [
-		{
-			turn: 5,
-			label: 'turn 5',
-			mutation: 'parts_shortage spawned 3 turns earlier',
-			diff: [
-				{ topic: 'parts', original: 'FW-07 flagged at turn 8', branch: 'FW-07 flagged at turn 5' },
-				{ topic: 'logistics', original: 'standard freight', branch: 'expedited freight booked' }
-			]
-		},
-		{
-			turn: 10,
-			label: 'turn 10',
-			mutation: 'tyre_engineer commits "wets" instead of "mediums"',
-			diff: [
-				{ topic: 'tyres', original: 'mediums, one-stop', branch: 'wets, two-stop' },
-				{ topic: 'strategy', original: 'track position', branch: 'undercut on lap 18' }
-			]
-		},
-		{
-			turn: 15,
-			label: 'turn 15',
-			mutation: 'weather_model calls rain at lap 43',
-			diff: [
-				{ topic: 'weather', original: 'dry to flag', branch: 'rain from lap 43' },
-				{ topic: 'tyres', original: 'stay out on hards', branch: 'box for inters, lap 43' },
-				{ topic: 'strategy', original: 'P4 finish', branch: 'P2 finish (counterfactual)' }
-			]
-		}
 	];
-	let branchTurn = $state(15);
-	const scenario = $derived(SCENARIOS.find((s) => s.turn === branchTurn) ?? SCENARIOS[2]);
 
-	function togglePlay() {
-		playing = !playing;
-	}
-	function step() {
-		playing = false;
-		tick = (tick + 1) % (MAX_TICK + 1);
-	}
-	function reset() {
-		playing = false;
-		tick = 0;
-	}
+	const fmt = (n: number | null) => (n === null || n === undefined ? '—' : n.toFixed(2));
 
 	onMount(() => {
-		const timer = setInterval(() => {
-			if (playing) tick = tick >= MAX_TICK ? 0 : tick + 1;
-		}, 1400);
-
 		const io = new IntersectionObserver(
 			(entries) => {
 				entries.forEach((e) => {
@@ -183,11 +132,7 @@
 			{ threshold: 0.12, rootMargin: '0px 0px -8% 0px' }
 		);
 		document.querySelectorAll('.reveal, .reveal-stagger').forEach((el) => io.observe(el));
-
-		return () => {
-			clearInterval(timer);
-			io.disconnect();
-		};
+		return () => io.disconnect();
 	});
 </script>
 
@@ -195,7 +140,7 @@
 	<title>Live Dashboard — Ezra Operations</title>
 	<meta
 		name="description"
-		content="Ezra operations dashboard — live agent fleet, three-tier memory, belief reconciliation, and branching replay."
+		content="Ezra operations dashboard — a real recorded multi-agent run: agent fleet, three-tier memory, belief reconciliation, federation, and a counterfactual branch."
 	/>
 </svelte:head>
 
@@ -204,69 +149,65 @@
 	<section class="section db-head reveal">
 		<div class="section-head">
 			<div class="idx">// Operations</div>
-			<h2>Live <em>operations</em> dashboard</h2>
+			<h2>Recorded <em>operations</em> dashboard</h2>
 			<p class="lede">
-				A scripted simulation of a session graph mid-flight: agents spawning and terminating, the
-				three memory tiers filling, beliefs reconciling under contradiction, and a counterfactual
-				branch running forward. Illustrative — no backend attached.
+				A real session graph, captured end-to-end from a live <b>google.adk</b> fleet run on GKE —
+				Vertex Gemini agents reasoning over MongoDB Atlas, Snowflake, and BigQuery. Every number
+				below is read back from the runtime: the agents and their scopes, the append-only belief
+				log, the contradiction that genuinely fired and how trust resolved it, the federated
+				fetches, and a counterfactual branch. Nothing here is staged.
 			</p>
 		</div>
 
-		<div class="db-controls">
-			<button class="db-btn" onclick={togglePlay} aria-pressed={playing}>
-				<span class="db-dot" class:live={playing}></span>
-				{playing ? 'Live' : 'Paused'}
-			</button>
-			<button class="db-btn ghost" onclick={step}>Step →</button>
-			<button class="db-btn ghost" onclick={reset}>Reset</button>
-			<div class="db-clock">
-				turn <b>{tick}</b> / {MAX_TICK}
-			</div>
+		<div class="db-meta">
+			<span class="db-meta-dot"></span>
+			<span>recorded <b>{recordedAt}</b></span>
+			<span class="db-meta-sep">·</span>
+			<span>{snap.meta.llm_model}</span>
+			<span class="db-meta-sep">·</span>
+			<span>graph <code>{snap.meta.graph_id}</code></span>
 		</div>
 	</section>
 
 	<!-- Top stat row -->
 	<section class="db-stats reveal-stagger">
 		<div class="db-stat">
-			<div class="db-stat-n">{agentCount}</div>
-			<div class="db-stat-l">Active agents</div>
-			<div class="db-stat-s">peak {peakCount} this session</div>
+			<div class="db-stat-n">{snap.agents.length}</div>
+			<div class="db-stat-l">Agents spawned</div>
+			<div class="db-stat-s">{committedCount} committed a belief</div>
 		</div>
 		<div class="db-stat">
-			<div class="db-stat-n">{coldCommitments}</div>
+			<div class="db-stat-n">{snap.tiers.cold_commitments}</div>
 			<div class="db-stat-l">Belief commitments</div>
 			<div class="db-stat-s">append-only · replayable</div>
 		</div>
 		<div class="db-stat">
-			<div class="db-stat-n">{fired ? 1 : 0}</div>
+			<div class="db-stat-n">{recon ? 1 : 0}</div>
 			<div class="db-stat-l">Contradictions resolved</div>
-			<div class="db-stat-s">two-pass · highest-trust</div>
+			<div class="db-stat-s">two-pass · {recon ? recon.strategy : 'none fired'}</div>
 		</div>
 		<div class="db-stat">
-			<div class="db-stat-n">3</div>
-			<div class="db-stat-l">Federated sources</div>
-			<div class="db-stat-s">Atlas · Snowflake · BigQuery</div>
+			<div class="db-stat-n">{snap.federated_fetches.length}</div>
+			<div class="db-stat-l">Federated fetches</div>
+			<div class="db-stat-s">{snap.meta.sources.join(' · ')}</div>
 		</div>
 	</section>
 
 	<!-- Agents + tiers -->
 	<section class="section db-grid-2">
-		<!-- Live agent fleet -->
+		<!-- Agent fleet -->
 		<div class="db-panel reveal">
 			<div class="db-panel-head">
 				<h3>Agent fleet</h3>
-				<span class="db-count">{agentCount} active</span>
+				<span class="db-count">{snap.agents.length} spawned</span>
 			</div>
 			<ul class="db-agents">
-				{#each FLEET as agent (agent.id)}
-					{@const isActive = activeAgents.includes(agent)}
-					<li class="db-agent" class:inactive={!isActive}>
-						<span class="db-agent-dot" class:on={isActive}></span>
+				{#each snap.agents as agent (agent.id)}
+					<li class="db-agent" class:inactive={!agent.committed}>
+						<span class="db-agent-dot" class:on={agent.committed}></span>
 						<span class="db-agent-id">{agent.id}</span>
-						<span class="db-agent-scope">{agent.scope}</span>
-						<span class="db-agent-state">
-							{#if isActive}active{:else if agent.born > tick}pending{:else}terminated{/if}
-						</span>
+						<span class="db-agent-scope">{agent.scope.join(', ')}</span>
+						<span class="db-agent-state">{agent.committed ? 'committed' : 'no commit'}</span>
 					</li>
 				{/each}
 			</ul>
@@ -288,7 +229,7 @@
 						<div class="db-tier-bar">
 							<div
 								class="db-tier-fill"
-								style="width:{Math.min(100, (t.value / t.cap) * 100)}%; background:{t.color}"
+								style="width:{Math.min(100, (t.value / tierMax) * 100)}%; background:{t.color}"
 							></div>
 						</div>
 						<div class="db-tier-foot">
@@ -306,48 +247,106 @@
 		<div class="db-panel">
 			<div class="db-panel-head">
 				<h3>Belief state &amp; reconciliation</h3>
-				<span class="db-count" class:fired>
-					{fired ? 'contradiction resolved' : 'coherent'}
+				<span class="db-count" class:fired={recon}>
+					{recon ? 'contradiction resolved' : 'coherent'}
 				</span>
 			</div>
 
 			<ul class="db-beliefs">
-				{#each beliefs as b (b.agent + b.topic)}
-					<li class="db-belief" class:superseded={b.superseded} class:winner={b.winner}>
+				{#each snap.beliefs as b (b.agent + b.topic + b.turn)}
+					<li class="db-belief" class:superseded={b.superseded} class:winner={recon && b.agent === recon.winner && b.topic === recon.topic}>
 						<span class="db-belief-topic">{b.topic}</span>
 						<span class="db-belief-claim">{b.claim}</span>
 						<span class="db-belief-agent">{b.agent}</span>
-						{#if b.superseded}<span class="db-tag dead">superseded</span>{/if}
-						{#if b.winner}<span class="db-tag win">accepted</span>{/if}
+						{#if b.superseded}<span class="db-tag dead">superseded</span>
+						{:else if recon && b.agent === recon.winner && b.topic === recon.topic}<span
+								class="db-tag win">accepted</span
+							>{/if}
 					</li>
 				{/each}
 			</ul>
 
-			{#if fired}
+			{#if recon}
 				<div class="db-recon">
 					<div class="db-recon-row">
 						<span class="db-recon-k">Detected</span>
 						<span class="db-recon-v"
-							>two-pass · embedding cosine 0.83 → NLI <b>contradiction</b> 0.97 on
-							<b>tyres</b></span
+							>two-pass · embedding cosine <b>{fmt(recon.similarity)}</b> → NLI
+							<b>contradiction</b> {fmt(recon.nli_confidence)} on <b>{recon.topic}</b></span
 						>
 					</div>
 					<div class="db-recon-row">
 						<span class="db-recon-k">Strategy</span>
-						<span class="db-recon-v">highest_trust</span>
+						<span class="db-recon-v">{recon.strategy}</span>
 					</div>
 					<div class="db-recon-row">
 						<span class="db-recon-k">Resolved</span>
 						<span class="db-recon-v"
-							>tyre_engineer <b>0.95</b> &gt; race_strategy <b>0.80</b> → accept_new; softs superseded</span
+							>{recon.winner} <b>{fmt(recon.winner_trust)}</b> &gt; {recon.loser}
+							<b>{fmt(recon.loser_trust)}</b> → {recon.decision}; {recon.decision === 'accept_new'
+								? `${recon.loser}'s claim superseded`
+								: `${recon.winner}'s claim kept`}</span
 						>
 					</div>
 				</div>
 			{:else}
 				<p class="db-hint">
-					No active contradictions. Let the session run to turn {CONTRADICTION_TICK} — race_strategy and
-					tyre_engineer will disagree on <b>tyres</b>.
+					No contradiction fired on this run — every agent stayed coherent within its scope.
 				</p>
+			{/if}
+		</div>
+	</section>
+
+	<!-- Federation + permission scoping -->
+	<section class="section db-grid-2">
+		<div class="db-panel reveal">
+			<div class="db-panel-head">
+				<h3>Federated fetches</h3>
+				<span class="db-count">live · provenance</span>
+			</div>
+			{#if snap.federated_fetches.length}
+				<ul class="db-fetches">
+					{#each snap.federated_fetches as f (f.agent + f.source)}
+						<li class="db-fetch">
+							<span class="db-fetch-agent">{f.agent}</span>
+							<span class="db-fetch-src">{f.source}</span>
+							<span class="db-fetch-rows">{f.rows} rows</span>
+							<span class="db-tag" class:tt={f.time_travel_available}>
+								{f.time_travel_available ? 'time-travel' : 'no time-travel'}
+							</span>
+						</li>
+					{/each}
+				</ul>
+			{:else}
+				<p class="db-hint">No federated fetch landed on this run.</p>
+			{/if}
+		</div>
+
+		<div class="db-panel reveal">
+			<div class="db-panel-head">
+				<h3>Permission scoping</h3>
+				<span class="db-count">policy engine</span>
+			</div>
+			{#if snap.denial}
+				<div class="db-denial">
+					<div class="db-denial-row">
+						<span class="db-recon-k">Denied</span>
+						<span class="db-recon-v"
+							><b>{snap.denial.agent}</b> requested <b>{snap.denial.denied_topic}</b> — outside its
+							remit</span
+						>
+					</div>
+					<div class="db-denial-row">
+						<span class="db-recon-k">Scope</span>
+						<span class="db-recon-v">{snap.denial.scope.join(', ')}</span>
+					</div>
+					<p class="db-hint">
+						The policy engine refused the out-of-scope fetch before any data left the source —
+						scoping is enforced by Ezra, not the agent.
+					</p>
+				</div>
+			{:else}
+				<p class="db-hint">No out-of-scope request was attempted on this run.</p>
 			{/if}
 		</div>
 	</section>
@@ -361,50 +360,40 @@
 			</div>
 
 			<p class="db-hint">
-				Branch from a prior turn, mutate state, and run forward. The diff shows where the branch
-				diverges from reality.
+				A real counterfactual branched from turn 1 of the live graph and run forward — mutating
+				<b>race_strategy</b>'s call to "wets at lap 43". The diff shows where the branch diverges
+				from what actually happened.
 			</p>
 
-			<div class="db-branch-picker">
-				{#each SCENARIOS as s (s.turn)}
-					<button
-						class="db-chip"
-						class:active={branchTurn === s.turn}
-						onclick={() => (branchTurn = s.turn)}
-					>
-						branch @ {s.label}
-					</button>
-				{/each}
-			</div>
-
-			<div class="db-mutation">
-				<span class="db-recon-k">Mutation</span>
-				<span class="db-recon-v">{scenario.mutation}</span>
-			</div>
-
-			<div class="db-diff">
-				<div class="db-diff-head">
-					<span>topic</span>
-					<span>original</span>
-					<span>branch</span>
-				</div>
-				{#each scenario.diff as d (d.topic)}
-					<div class="db-diff-row">
-						<span class="db-diff-topic">{d.topic}</span>
-						<span class="db-diff-orig">{d.original}</span>
-						<span class="db-diff-branch">{d.branch}</span>
+			{#if snap.branch && snap.branch.diverged && snap.branch.diverged.length}
+				<div class="db-diff">
+					<div class="db-diff-head">
+						<span>topic</span>
+						<span>commitment present only in the branch</span>
 					</div>
-				{/each}
-			</div>
+					{#each snap.branch.diverged as d (d.topic)}
+						{#each d.only_in_branch as claim (claim)}
+							<div class="db-diff-row">
+								<span class="db-diff-topic">{d.topic}</span>
+								<span class="db-diff-branch">{claim}</span>
+							</div>
+						{/each}
+					{/each}
+				</div>
+			{:else if snap.branch && snap.branch.error}
+				<p class="db-hint">Branch run reported: {snap.branch.error}</p>
+			{:else}
+				<p class="db-hint">The branch produced no divergence on this run.</p>
+			{/if}
 		</div>
 	</section>
 
 	<section class="section db-foot reveal">
 		<p class="muted">
-			Illustrative simulation. The real dashboard reads live runtime state over the REST surface (<code
-				>/ezra/health</code
-			>, <code>/ezra/belief/snapshot</code>,
-			<code>/ezra/branch/diff</code>). See the <a href="/docs/rest-api">REST API</a>.
+			Recorded from a live GKE run, inherited from <code>{snap.meta.inherited_from}</code>. The same
+			state is available live over the REST surface (<code>/ezra/health</code>,
+			<code>/ezra/belief/snapshot</code>, <code>/ezra/branch/diff</code>). See the
+			<a href="/docs/rest-api">REST API</a>.
 		</p>
 	</section>
 </main>
@@ -419,64 +408,36 @@
 		padding-bottom: 40px;
 		display: flex;
 		flex-direction: column;
-		gap: 28px;
+		gap: 24px;
 	}
 
-	/* Controls */
-	.db-controls {
+	/* Recorded-run meta line */
+	.db-meta {
 		display: flex;
 		align-items: center;
 		gap: 12px;
 		flex-wrap: wrap;
-	}
-	.db-btn {
-		display: inline-flex;
-		align-items: center;
-		gap: 9px;
-		padding: 9px 18px;
-		background: rgba(45, 199, 184, 0.06);
-		color: var(--fg);
-		border: 1px solid var(--accent);
 		font-family: var(--f-mono);
-		font-size: 11px;
-		letter-spacing: 0.14em;
-		text-transform: uppercase;
-		cursor: pointer;
-		transition: all 0.2s;
+		font-size: 11.5px;
+		letter-spacing: 0.06em;
+		color: var(--fg-3);
 	}
-	.db-btn:hover {
-		background: var(--accent);
-		color: var(--bg);
-	}
-	.db-btn.ghost {
-		background: transparent;
-		border-color: var(--line);
-		color: var(--fg-2);
-	}
-	.db-btn.ghost:hover {
-		border-color: var(--fg);
-		background: transparent;
+	.db-meta b {
 		color: var(--fg);
 	}
-	.db-dot {
+	.db-meta code {
+		color: var(--accent);
+		font-size: 11px;
+	}
+	.db-meta-sep {
+		color: var(--fg-4);
+	}
+	.db-meta-dot {
 		width: 7px;
 		height: 7px;
 		border-radius: 50%;
-		background: var(--fg-4);
-	}
-	.db-dot.live {
 		background: var(--accent);
-		animation: pulse 1.4s infinite;
-	}
-	.db-clock {
-		font-family: var(--f-mono);
-		font-size: 12px;
-		color: var(--fg-3);
-		letter-spacing: 0.1em;
-		margin-left: auto;
-	}
-	.db-clock b {
-		color: var(--accent);
+		box-shadow: 0 0 8px rgba(45, 199, 184, 0.6);
 	}
 
 	/* Stat row */
@@ -570,13 +531,12 @@
 		border-bottom: 1px solid var(--line-2);
 		font-family: var(--f-mono);
 		font-size: 12px;
-		transition: opacity 0.3s;
 	}
 	.db-agent:last-child {
 		border-bottom: 0;
 	}
 	.db-agent.inactive {
-		opacity: 0.38;
+		opacity: 0.5;
 	}
 	.db-agent-dot {
 		width: 8px;
@@ -696,6 +656,7 @@
 		text-transform: uppercase;
 		padding: 3px 8px;
 		border: 1px solid var(--line);
+		color: var(--fg-3);
 	}
 	.db-tag.dead {
 		color: var(--hot);
@@ -705,9 +666,14 @@
 		color: var(--accent);
 		border-color: rgba(45, 199, 184, 0.4);
 	}
+	.db-tag.tt {
+		color: var(--accent-2);
+		border-color: rgba(125, 224, 217, 0.4);
+	}
 
-	/* Reconciliation trace */
-	.db-recon {
+	/* Reconciliation / denial trace */
+	.db-recon,
+	.db-denial {
 		padding: 18px 20px;
 		border-top: 1px solid var(--line);
 		background: rgba(0, 0, 0, 0.22);
@@ -715,7 +681,8 @@
 		flex-direction: column;
 		gap: 10px;
 	}
-	.db-recon-row {
+	.db-recon-row,
+	.db-denial-row {
 		display: grid;
 		grid-template-columns: 90px 1fr;
 		gap: 14px;
@@ -747,53 +714,48 @@
 	.db-hint b {
 		color: var(--accent);
 	}
+	.db-denial .db-hint {
+		padding: 4px 0 0;
+	}
 
-	/* Branching */
-	.db-branch-picker {
-		display: flex;
-		gap: 10px;
-		flex-wrap: wrap;
-		padding: 0 20px 16px;
+	/* Federated fetches */
+	.db-fetches {
+		list-style: none;
+		margin: 0;
+		padding: 0;
 	}
-	.db-chip {
-		padding: 8px 14px;
-		background: transparent;
-		border: 1px solid var(--line);
-		color: var(--fg-2);
-		font-family: var(--f-mono);
-		font-size: 11px;
-		letter-spacing: 0.08em;
-		cursor: pointer;
-		transition: all 0.2s;
-	}
-	.db-chip:hover {
-		border-color: var(--fg);
-		color: var(--fg);
-	}
-	.db-chip.active {
-		border-color: var(--accent);
-		color: var(--accent);
-		background: rgba(45, 199, 184, 0.06);
-	}
-	.db-mutation {
+	.db-fetch {
 		display: grid;
-		grid-template-columns: 90px 1fr;
-		gap: 14px;
-		padding: 14px 20px;
-		border-top: 1px solid var(--line-2);
+		grid-template-columns: 1.1fr 1.8fr auto auto;
+		align-items: center;
+		gap: 12px;
+		padding: 13px 20px;
+		border-bottom: 1px solid var(--line-2);
 		font-family: var(--f-mono);
 		font-size: 11.5px;
 	}
-	.db-mutation .db-recon-v {
+	.db-fetch:last-child {
+		border-bottom: 0;
+	}
+	.db-fetch-agent {
+		color: var(--fg-3);
+	}
+	.db-fetch-src {
+		color: var(--fg);
+		overflow-wrap: anywhere;
+	}
+	.db-fetch-rows {
 		color: var(--accent-2);
 	}
+
+	/* Branching diff */
 	.db-diff {
 		border-top: 1px solid var(--line);
 	}
 	.db-diff-head,
 	.db-diff-row {
 		display: grid;
-		grid-template-columns: 110px 1fr 1fr;
+		grid-template-columns: 110px 1fr;
 		gap: 14px;
 		padding: 12px 20px;
 		font-family: var(--f-mono);
@@ -817,9 +779,6 @@
 		text-transform: uppercase;
 		font-size: 10px;
 		letter-spacing: 0.1em;
-	}
-	.db-diff-orig {
-		color: var(--fg-4);
 	}
 	.db-diff-branch {
 		color: var(--fg);
@@ -852,6 +811,7 @@
 			grid-template-columns: 1fr;
 		}
 		.db-belief,
+		.db-fetch,
 		.db-diff-head,
 		.db-diff-row {
 			grid-template-columns: 1fr;

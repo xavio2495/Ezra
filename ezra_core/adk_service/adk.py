@@ -136,6 +136,8 @@ def ezra_adk_tools(
                 "new_agent": service.agent_id,
                 "new_claim": claim,
                 "with_agent": outcome.contradiction.existing_agent_id,
+                "similarity": outcome.contradiction.similarity_score,
+                "nli_confidence": outcome.contradiction.nli_confidence,
                 "decision": outcome.resolution.decision,
                 "strategy": outcome.resolution.merge_strategy_used,
             }

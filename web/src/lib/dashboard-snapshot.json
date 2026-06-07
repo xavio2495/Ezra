@@ -1,0 +1,148 @@
+{
+  "meta": {
+    "recorded_at": "2026-06-07T10:05:50.317346+00:00",
+    "graph_id": "race-weekend-monaco-2026-fleet",
+    "inherited_from": "race-weekend-imola-2026",
+    "llm_model": "vertex_ai/gemini-2.5-flash",
+    "sources": ["MongoDB Atlas", "Snowflake", "BigQuery"]
+  },
+  "agents": [
+    {
+      "id": "race_strategy",
+      "role": "Race Strategist",
+      "scope": ["strategy", "tyres"],
+      "committed": true,
+      "trust_tyres": 0.64
+    },
+    {
+      "id": "tyre_engineer",
+      "role": "Tyre Engineer",
+      "scope": ["tyres"],
+      "committed": true,
+      "trust_tyres": 0.96
+    },
+    {
+      "id": "aero_rd",
+      "role": "Aero R&D Engineer",
+      "scope": ["aero"],
+      "committed": false,
+      "trust_tyres": null
+    },
+    {
+      "id": "logistics",
+      "role": "Logistics Coordinator",
+      "scope": ["parts", "supplier", "calendar"],
+      "committed": true,
+      "trust_tyres": null
+    },
+    {
+      "id": "telemetry_analyst",
+      "role": "Telemetry Analyst",
+      "scope": ["telemetry"],
+      "committed": true,
+      "trust_tyres": null
+    },
+    {
+      "id": "weather_model",
+      "role": "Weather Modeller",
+      "scope": ["weather"],
+      "committed": true,
+      "trust_tyres": null
+    }
+  ],
+  "tiers": {
+    "hot_turns": 30,
+    "warm_summaries": 0,
+    "cold_commitments": 5,
+    "active_beliefs": 4,
+    "superseded_beliefs": 1
+  },
+  "beliefs": [
+    {
+      "agent": "logistics",
+      "topic": "parts",
+      "claim": "All necessary parts for the final stint are confirmed to be in optimal condition and readily available.",
+      "turn": 1,
+      "trust": 1.0,
+      "active": true,
+      "superseded": false
+    },
+    {
+      "agent": "telemetry_analyst",
+      "topic": "telemetry",
+      "claim": "Current car telemetry data is unavailable.",
+      "turn": 1,
+      "trust": 1.0,
+      "active": true,
+      "superseded": false
+    },
+    {
+      "agent": "race_strategy",
+      "topic": "tyres",
+      "claim": "Final stint: softs.",
+      "turn": 1,
+      "trust": 0.8,
+      "active": false,
+      "superseded": true
+    },
+    {
+      "agent": "tyre_engineer",
+      "topic": "tyres",
+      "claim": "Final stint: hards.",
+      "turn": 1,
+      "trust": 0.95,
+      "active": true,
+      "superseded": false
+    },
+    {
+      "agent": "weather_model",
+      "topic": "weather",
+      "claim": "There is a 30% chance of light rain in approximately 15 minutes.",
+      "turn": 1,
+      "trust": 1.0,
+      "active": true,
+      "superseded": false
+    }
+  ],
+  "reconciliation": {
+    "topic": "tyres",
+    "similarity": 0.846461042661129,
+    "nli_confidence": 0.98,
+    "strategy": "highest_trust",
+    "decision": "accept_new",
+    "winner": "tyre_engineer",
+    "loser": "race_strategy",
+    "winner_trust": 0.96,
+    "loser_trust": 0.64
+  },
+  "federated_fetches": [
+    {
+      "kind": "fetch",
+      "agent": "aero_rd",
+      "source": "bigquery:ezra-498021.formula_1.aero_configs",
+      "time_travel_available": true,
+      "rows": 325
+    },
+    {
+      "kind": "fetch",
+      "agent": "race_strategy",
+      "source": "snowflake:EZRA.PUBLIC.RACE_RESULTS",
+      "time_travel_available": true,
+      "rows": 25873
+    }
+  ],
+  "denial": {
+    "agent": "logistics",
+    "denied_topic": "aero",
+    "scope": ["parts", "supplier", "calendar"]
+  },
+  "branch": {
+    "diverged": [
+      {
+        "topic": "tyres",
+        "only_in_original": [],
+        "only_in_branch": ["wets called at lap 43"]
+      }
+    ]
+  }
+}
