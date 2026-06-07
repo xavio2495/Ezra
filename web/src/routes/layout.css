@@ -89,6 +89,30 @@ body {
   overflow-x: hidden;
 }
 
+/* ========== SCROLLBARS — Teal Night ========== */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--fg-4) transparent;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--fg-4);
+  border-radius: 8px;
+  border: 2px solid var(--bg);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--fg-3);
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 /* Texture overlay */
 body::before {
   content: "";
@@ -619,23 +643,22 @@ footer {
 }
 
 .hero-install {
-  margin-top: 48px;
+  margin: 48px auto 0;
   display: flex;
   align-items: center;
   gap: 0;
   border: 1px solid var(--line);
   background: rgba(0, 0, 0, 0.3);
-  max-width: 520px;
+  width: fit-content;
+  max-width: 100%;
 }
 .hero-install code {
-  padding: 14px 24px;
+  padding: 14px 22px;
   font-family: var(--f-mono);
-  font-size: 13.5px;
+  font-size: 12.5px;
   color: var(--fg);
-  letter-spacing: 0.02em;
+  letter-spacing: 0.01em;
   white-space: nowrap;
-  overflow-x: auto;
-  min-width: 0;
 }
 .hero-install code .kw { color: var(--accent); }
 .hero-install .hi-copy {

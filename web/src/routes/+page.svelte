@@ -332,8 +332,7 @@
 			<h2>A fleet that <em>spawns</em><br />and shares.</h2>
 			<p class="lede">
 				One session graph binds N agents — spawned and terminated as the operation needs. Each has
-				its own scoped view, but they share one belief store and one tiered memory. Drag, pan, and
-				zoom the graph below.
+				its own scoped view, but they share one belief store and one tiered memory.
 			</p>
 		</div>
 		<div class="reveal" style="margin-top: 40px;">

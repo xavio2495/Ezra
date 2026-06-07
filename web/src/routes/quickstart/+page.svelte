@@ -193,7 +193,13 @@ uv sync --frozen --group agents   <span class="cm"># google-adk + connectors</sp
 			<div class="qs-code-wrap">
 				<div class="qs-code-bar">
 					<span>bash</span>
-					<button onclick={(e) => copyText('', e.currentTarget as HTMLButtonElement)}>Copy</button>
+					<button
+						onclick={(e) =>
+							copyText(
+								'# Create a service account\ngcloud iam service-accounts create ezra-runtime \\\n  --display-name="Ezra Runtime"\n\n# Grant Secret Manager access\ngcloud projects add-iam-policy-binding $PROJECT_ID \\\n  --member="serviceAccount:ezra-runtime@$PROJECT_ID.iam.gserviceaccount.com" \\\n  --role="roles/secretmanager.secretAccessor"\n\n# Keyless: bind the GKE KSA to this GSA (Workload Identity — no key files)\ngcloud iam service-accounts add-iam-policy-binding \\\n  ezra-runtime@$PROJECT_ID.iam.gserviceaccount.com \\\n  --role="roles/iam.workloadIdentityUser" \\\n  --member="serviceAccount:$PROJECT_ID.svc.id.goog[ezra/ezra-api]"',
+								e.currentTarget as HTMLButtonElement
+							)}>Copy</button
+					>
 				</div>
 				<pre class="qs-code"><span class="cm"># Create a service account</span>
 gcloud iam service-accounts create ezra-runtime \
@@ -221,20 +227,26 @@ gcloud iam service-accounts add-iam-policy-binding \
 				<code>GOOGLE_APPLICATION_CREDENTIALS</code> entirely — no key ever touches disk.
 			</div>
 
-			<p>Store your MongoDB URI and Redis URL in Secret Manager:</p>
+			<p>Push your Atlas URI and an API bearer token into Secret Manager:</p>
 
 			<div class="qs-code-wrap">
 				<div class="qs-code-bar">
 					<span>bash</span>
-					<button onclick={(e) => copyText('', e.currentTarget as HTMLButtonElement)}>Copy</button>
+					<button
+						onclick={(e) =>
+							copyText(
+								'printf "mongodb+srv://user:pass@cluster.mongodb.net" | \\\n  gcloud secrets create ezra-mongodb-uri --data-file=-\n\nopenssl rand -hex 24 | \\\n  gcloud secrets create ezra-api-bearer-token --data-file=-',
+								e.currentTarget as HTMLButtonElement
+							)}>Copy</button
+					>
 				</div>
 				<pre class="qs-code">printf <span class="str"
 						>"mongodb+srv://user:pass@cluster.mongodb.net"</span
 					> | \
-  gcloud secrets create EZRA_MONGO_URI --data-file=-
+  gcloud secrets create ezra-mongodb-uri --data-file=-
 
-printf <span class="str">"redis://10.0.0.1:6379"</span> | \
-  gcloud secrets create EZRA_REDIS_URL --data-file=-</pre>
+openssl rand -hex 24 | \
+  gcloud secrets create ezra-api-bearer-token --data-file=-</pre>
 			</div>
 		</section>
 
@@ -253,21 +265,30 @@ printf <span class="str">"redis://10.0.0.1:6379"</span> | \
 			<div class="qs-code-wrap">
 				<div class="qs-code-bar">
 					<span>.env</span>
-					<button onclick={(e) => copyText('', e.currentTarget as HTMLButtonElement)}>Copy</button>
+					<button
+						onclick={(e) =>
+							copyText(
+								'# Storage (cold = MongoDB Atlas, hot = Redis, warm = Qdrant)\nEZRA_MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net/?retryWrites=true\nEZRA_REDIS_URL=redis://localhost:6379\nEZRA_QDRANT_URL=http://localhost:6333\n\n# Model (local: AI Studio key; on GKE: keyless Vertex)\nEZRA_LLM_MODEL=gemini/gemini-3.5-flash\nEZRA_LLM_API_KEY=your-gemini-key\nEZRA_EMBEDDING_MODEL=gemini/gemini-embedding-001\n\n# API auth\nEZRA_API_BEARER_TOKEN=change-me',
+								e.currentTarget as HTMLButtonElement
+							)}>Copy</button
+					>
 				</div>
-				<pre class="qs-code"><span class="cm"># Google Cloud</span>
-GOOGLE_APPLICATION_CREDENTIALS=<span class="str">./ezra-key.json</span>
-GCP_PROJECT=<span class="str">my-project-id</span>
-GCP_LOCATION=<span class="str">us-central1</span>
-
-<span class="cm"># Storage</span>
-EZRA_MONGO_URI=<span class="str">mongodb+srv://user:pass@cluster.mongodb.net</span>
+				<pre class="qs-code"><span class="cm"
+						># Storage (cold = MongoDB Atlas, hot = Redis, warm = Qdrant)</span
+					>
+EZRA_MONGODB_URI=<span class="str"
+						>mongodb+srv://user:pass@cluster.mongodb.net/?retryWrites=true</span
+					>
 EZRA_REDIS_URL=<span class="str">redis://localhost:6379</span>
+EZRA_QDRANT_URL=<span class="str">http://localhost:6333</span>
 
-<span class="cm"># Ezra core</span>
-EZRA_API_KEY=<span class="str">sk-ezra-local-dev</span>
-EZRA_BELIEF_STRATEGY=<span class="str">last_write</span>
-EZRA_LOG_LEVEL=<span class="str">INFO</span></pre>
+<span class="cm"># Model (local: AI Studio key; on GKE: keyless Vertex)</span>
+EZRA_LLM_MODEL=<span class="str">gemini/gemini-3.5-flash</span>
+EZRA_LLM_API_KEY=<span class="str">your-gemini-key</span>
+EZRA_EMBEDDING_MODEL=<span class="str">gemini/gemini-embedding-001</span>
+
+<span class="cm"># API auth</span>
+EZRA_API_BEARER_TOKEN=<span class="str">change-me</span></pre>
 			</div>
 		</section>
 
@@ -398,7 +419,13 @@ asyncio.run(main())</pre>
 			<div class="qs-code-wrap">
 				<div class="qs-code-bar">
 					<span>bash</span>
-					<button onclick={(e) => copyText('', e.currentTarget as HTMLButtonElement)}>Copy</button>
+					<button
+						onclick={(e) =>
+							copyText(
+								'curl -X POST http://localhost:8080/ezra/belief/snapshot \\\n  -H "Authorization: Bearer $EZRA_API_BEARER_TOKEN" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"session_graph_id": "demo-fleet", "permission_scope": ["market_data"]}\'',
+								e.currentTarget as HTMLButtonElement
+							)}>Copy</button
+					>
 				</div>
 				<pre class="qs-code">curl -X POST http://localhost:8080/ezra/belief/snapshot \
   -H <span class="str">"Content-Type: application/json"</span> \

@@ -1,9 +1,10 @@
 <script lang="ts">
-	// Interactive session-graph diagram (xyflow). Shows a root session graph
-	// spawning a dynamic agent fleet, all sharing one belief store + memory tiers.
-	// Rendered browser-only (xyflow needs the DOM) to stay SSR/prerender-safe.
+	// Static session-graph diagram (xyflow, rendered inline — not the interactive
+	// viewer). Shows a root session graph spawning a dynamic agent fleet, all
+	// sharing one belief store + memory tiers. All pan/zoom/drag is disabled so it
+	// reads as a fixed diagram on the page. Browser-only (xyflow needs the DOM).
 	import { onMount } from 'svelte';
-	import { SvelteFlow, Background, Controls, type Node, type Edge } from '@xyflow/svelte';
+	import { SvelteFlow, type Node, type Edge } from '@xyflow/svelte';
 	import '@xyflow/svelte/dist/style.css';
 
 	let mounted = $state(false);
@@ -71,27 +72,34 @@
 			bind:nodes
 			bind:edges
 			fitView
+			fitViewOptions={{ padding: 0.12 }}
+			nodesDraggable={false}
 			nodesConnectable={false}
 			elementsSelectable={false}
-			minZoom={0.4}
-			maxZoom={1.5}
-		>
-			<Background bgColor="transparent" patternColor="rgba(232,220,196,0.10)" gap={22} />
-			<Controls showLock={false} />
-		</SvelteFlow>
+			panOnDrag={false}
+			panOnScroll={false}
+			zoomOnScroll={false}
+			zoomOnPinch={false}
+			zoomOnDoubleClick={false}
+			preventScrolling={false}
+			minZoom={0.2}
+			maxZoom={1}
+		/>
 	{:else}
-		<div class="sg-placeholder">Loading interactive diagram…</div>
+		<div class="sg-placeholder">Loading diagram…</div>
 	{/if}
 </div>
 
 <style>
 	.sg-wrap {
-		height: 440px;
+		height: 400px;
 		width: 100%;
-		border: 1px solid var(--line);
-		border-radius: 8px;
-		background: rgba(0, 0, 0, 0.2);
 		overflow: hidden;
+	}
+	/* Static: no grab cursor, page scroll passes through. */
+	.sg-wrap :global(.svelte-flow__pane),
+	.sg-wrap :global(.svelte-flow__node) {
+		cursor: default;
 	}
 	.sg-placeholder {
 		display: grid;
