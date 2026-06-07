@@ -35,16 +35,16 @@
 </script>
 
 <svelte:head>
-	<title>Quick Start — Ezra × Google Cloud ADK</title>
+	<title>Quick Start — Ezra × Google ADK</title>
 </svelte:head>
 
 <main class="qs-shell">
 	<!-- Sidebar -->
 	<aside class="qs-sidebar">
 		<div class="qs-sidebar-inner">
-			<div class="qs-sidebar-label">// Google Cloud ADK</div>
+			<div class="qs-sidebar-label">// Local dev · Google ADK</div>
 			<ol class="qs-steps-nav">
-				{#each [[1, 'Prerequisites'], [2, 'Install Ezra'], [3, 'Google Cloud Auth'], [4, 'Configure Ezra'], [5, 'First ADK Agent'], [6, 'Run & Verify'], [7, 'Next Steps']] as [n, label]}
+				{#each [[1, 'Prerequisites'], [2, 'Install Ezra'], [3, 'Start the Backends'], [4, 'Configure Ezra'], [5, 'First ADK Agent'], [6, 'Run & Verify'], [7, 'Next Steps']] as [n, label]}
 					<li>
 						<a href="#step-{n}" class:active={activeStep === n}>
 							<span class="qs-step-num">{n}</span>
@@ -75,11 +75,13 @@
 				<span>/</span>
 				<span>Quick Start</span>
 			</div>
-			<h1>Google Cloud ADK<br /><em>Connector</em></h1>
+			<h1>Build your first<br /><em>agent</em></h1>
 			<p class="qs-intro">
-				Get a multi-agent system running on Google Cloud with Ezra memory and belief tracking in
-				under 15 minutes. This guide uses Google ADK (Agent Development Kit) with GKE, Secret
-				Manager, and MongoDB Atlas.
+				Run a scope-bound agent on Ezra locally in under 15 minutes — shared memory, belief
+				tracking, federated data. This guide drives it from Google ADK; the same runtime works with
+				LangGraph, LangChain, or any framework via the
+				<a href="/docs/sdk">SDK</a> and <a href="/docs/rest-api">REST API</a>. To run it on a
+				cluster, see <a href="/docs/deployment">Deployment</a>.
 			</p>
 
 			<div class="qs-prereq-badge">
@@ -87,7 +89,7 @@
 				<span>·</span>
 				<span>Python 3.12</span>
 				<span>·</span>
-				<span>Google Cloud Project required</span>
+				<span>Docker</span>
 			</div>
 		</div>
 
@@ -101,42 +103,27 @@
 			<p>Before starting, ensure you have:</p>
 
 			<ul class="qs-checklist">
-				<li><span class="ck">✓</span> Python 3.12</li>
+				<li><span class="ck">✓</span> <strong>Python 3.12</strong> + <code>uv</code></li>
 				<li>
 					<span class="ck">✓</span>
-					<a href="https://cloud.google.com/sdk/docs/install" target="_blank" rel="noopener"
-						>Google Cloud SDK</a
-					>
-					(<code>gcloud</code>) installed and authenticated
+					<strong>Docker</strong> — runs Redis (hot tier) + Qdrant (warm tier) locally
 				</li>
-				<li><span class="ck">✓</span> A Google Cloud project with billing enabled</li>
-				<li><span class="ck">✓</span> A MongoDB Atlas cluster (free tier works for this guide)</li>
 				<li>
-					<span class="ck">✓</span> Redis — local Docker or
-					<a href="https://cloud.google.com/memorystore" target="_blank" rel="noopener"
-						>Memorystore</a
-					> on GCP
+					<span class="ck">✓</span> A <strong>MongoDB Atlas</strong> cluster (cold tier; the free tier
+					works) and its connection string
+				</li>
+				<li>
+					<span class="ck">✓</span> A <strong>Gemini API key</strong> from
+					<a href="https://aistudio.google.com" target="_blank" rel="noopener">AI Studio</a> (on
+					GKE, Ezra uses keyless Vertex instead — see
+					<a href="/docs/deployment">Deployment</a>)
 				</li>
 			</ul>
 
-			<div class="qs-callout">
-				<span class="qs-callout-label">// GCP APIs to enable</span>
-				<div class="qs-code-wrap">
-					<div class="qs-code-bar">
-						<span>bash</span>
-						<button
-							onclick={(e) =>
-								copyText(
-									'gcloud services enable container.googleapis.com secretmanager.googleapis.com aiplatform.googleapis.com',
-									e.currentTarget as HTMLButtonElement
-								)}>Copy</button
-						>
-					</div>
-					<pre class="qs-code">gcloud services enable \
-  container.googleapis.com \
-  secretmanager.googleapis.com \
-  aiplatform.googleapis.com</pre>
-				</div>
+			<div class="qs-callout teal">
+				<span class="qs-callout-label">// Fastest path</span>
+				The <a href="/docs/deployment">one-command installer</a> sets all of this up for you:
+				<code>curl -fsSL https://ezra128.vercel.app/install.sh | bash</code>
 			</div>
 		</section>
 
@@ -182,12 +169,12 @@ uv sync --frozen --group agents   <span class="cm"># google-adk + connectors</sp
 		<section id="step-3" data-step="3" class="qs-section">
 			<div class="qs-step-label">
 				<span class="qs-step-n">03</span>
-				<h2>Google Cloud Auth</h2>
+				<h2>Start the Backends</h2>
 			</div>
 
 			<p>
-				Create a service account for Ezra with the minimum required roles. Ezra uses this account to
-				read from Secret Manager and optionally write to Cloud Logging.
+				Ezra's hot (Redis) and warm (Qdrant) tiers run as local containers; the repo ships a
+				<code>docker-compose.yml</code> for both. The cold tier is your MongoDB Atlas cluster (external).
 			</p>
 
 			<div class="qs-code-wrap">
@@ -195,58 +182,17 @@ uv sync --frozen --group agents   <span class="cm"># google-adk + connectors</sp
 					<span>bash</span>
 					<button
 						onclick={(e) =>
-							copyText(
-								'# Create a service account\ngcloud iam service-accounts create ezra-runtime \\\n  --display-name="Ezra Runtime"\n\n# Grant Secret Manager access\ngcloud projects add-iam-policy-binding $PROJECT_ID \\\n  --member="serviceAccount:ezra-runtime@$PROJECT_ID.iam.gserviceaccount.com" \\\n  --role="roles/secretmanager.secretAccessor"\n\n# Keyless: bind the GKE KSA to this GSA (Workload Identity — no key files)\ngcloud iam service-accounts add-iam-policy-binding \\\n  ezra-runtime@$PROJECT_ID.iam.gserviceaccount.com \\\n  --role="roles/iam.workloadIdentityUser" \\\n  --member="serviceAccount:$PROJECT_ID.svc.id.goog[ezra/ezra-api]"',
-								e.currentTarget as HTMLButtonElement
-							)}>Copy</button
+							copyText('docker compose up -d redis qdrant', e.currentTarget as HTMLButtonElement)}
+						>Copy</button
 					>
 				</div>
-				<pre class="qs-code"><span class="cm"># Create a service account</span>
-gcloud iam service-accounts create ezra-runtime \
-  --display-name=<span class="str">"Ezra Runtime"</span>
-
-<span class="cm"># Grant Secret Manager access</span>
-gcloud projects add-iam-policy-binding <span class="str">$PROJECT_ID</span> \
-  --member=<span class="str">"serviceAccount:ezra-runtime@$PROJECT_ID.iam.gserviceaccount.com"</span
-					> \
-  --role=<span class="str">"roles/secretmanager.secretAccessor"</span>
-
-<span class="cm"
-						># Keyless: bind the GKE service account to this GSA (Workload Identity — no key files)</span
-					>
-gcloud iam service-accounts add-iam-policy-binding \
-  ezra-runtime@<span class="str">$PROJECT_ID</span>.iam.gserviceaccount.com \
-  --role=<span class="str">"roles/iam.workloadIdentityUser"</span> \
-  --member=<span class="str">"serviceAccount:$PROJECT_ID.svc.id.goog[ezra/ezra-api]"</span></pre>
+				<pre class="qs-code">docker compose up -d redis qdrant</pre>
 			</div>
 
 			<div class="qs-callout teal">
-				<span class="qs-callout-label">// Production</span>
-				On GKE, use <strong>Workload Identity</strong> instead of key files. Annotate the Kubernetes
-				service account to impersonate <code>ezra-runtime@...</code> and skip
-				<code>GOOGLE_APPLICATION_CREDENTIALS</code> entirely — no key ever touches disk.
-			</div>
-
-			<p>Push your Atlas URI and an API bearer token into Secret Manager:</p>
-
-			<div class="qs-code-wrap">
-				<div class="qs-code-bar">
-					<span>bash</span>
-					<button
-						onclick={(e) =>
-							copyText(
-								'printf "mongodb+srv://user:pass@cluster.mongodb.net" | \\\n  gcloud secrets create ezra-mongodb-uri --data-file=-\n\nopenssl rand -hex 24 | \\\n  gcloud secrets create ezra-api-bearer-token --data-file=-',
-								e.currentTarget as HTMLButtonElement
-							)}>Copy</button
-					>
-				</div>
-				<pre class="qs-code">printf <span class="str"
-						>"mongodb+srv://user:pass@cluster.mongodb.net"</span
-					> | \
-  gcloud secrets create ezra-mongodb-uri --data-file=-
-
-openssl rand -hex 24 | \
-  gcloud secrets create ezra-api-bearer-token --data-file=-</pre>
+				<span class="qs-callout-label">// On GKE</span>
+				In production these run in-cluster and Atlas secrets come from Secret Manager via Workload Identity
+				— the installer and <a href="/docs/deployment">Deployment</a> guide handle it.
 			</div>
 		</section>
 
@@ -385,14 +331,19 @@ asyncio.run(main())</pre>
 			<div class="qs-code-wrap">
 				<div class="qs-code-bar">
 					<span>bash</span>
-					<button onclick={(e) => copyText('python agent.py', e.currentTarget as HTMLButtonElement)}
-						>Copy</button
+					<button
+						onclick={(e) =>
+							copyText('uv run python agent.py', e.currentTarget as HTMLButtonElement)}>Copy</button
 					>
 				</div>
-				<pre class="qs-code">python agent.py</pre>
+				<pre class="qs-code">uv run python agent.py</pre>
 			</div>
 
-			<p>Verify the Ezra runtime is healthy:</p>
+			<p>
+				The same runtime is exposed over HTTP by the REST API (<code
+					>uvicorn ezra_core.api.asgi:app</code
+				>). With it running, check health:
+			</p>
 
 			<div class="qs-code-wrap">
 				<div class="qs-code-bar">
@@ -408,13 +359,12 @@ asyncio.run(main())</pre>
 				<pre class="qs-code">curl http://localhost:8080/ezra/health
 <span class="cm"># Expected:</span>
 &#123; <span class="str">"status"</span>: <span class="str">"ok"</span>, <span class="str"
-						>"hot_tier"</span
-					>: <span class="str">"connected"</span>, <span class="str">"cold_tier"</span>: <span
-						class="str">"connected"</span
-					> &#125;</pre>
+						>"service"</span
+					>: true, <span class="str">"branching"</span>: true, <span class="str">"router"</span
+					>: true &#125;</pre>
 			</div>
 
-			<p>Check that the belief was written to MongoDB:</p>
+			<p>Inspect the belief state the agent committed:</p>
 
 			<div class="qs-code-wrap">
 				<div class="qs-code-bar">
@@ -479,11 +429,24 @@ asyncio.run(main())</pre>
 					<h4>Add More Connectors</h4>
 					<p>Connect Snowflake, BigQuery, and REST sources for pushdown federated queries.</p>
 				</a>
+				<a href="/docs/deployment" class="qs-next-card">
+					<div class="qnc-tag">// Deploy</div>
+					<h4>Ship to GKE</h4>
+					<p>
+						Take it to a cluster — the one-command installer, the Helm chart, or Terraform +
+						kustomize.
+					</p>
+				</a>
 			</div>
 
 			<div class="qs-final-cta">
 				<a class="cta-btn" href="/docs">Full Documentation <span class="arrow">→</span></a>
-				<a class="cta-btn ghost" href="mailto:field@ezra.dev">Get Support</a>
+				<a
+					class="cta-btn ghost"
+					href="https://github.com/xavio2495/Ezra"
+					target="_blank"
+					rel="noopener">GitHub</a
+				>
 			</div>
 		</section>
 	</div>

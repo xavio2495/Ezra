@@ -200,14 +200,14 @@
 				exchange: direct influence on the roadmap, priority support, and pre-launch pricing.
 			</p>
 			<div class="slide-ask-actions">
-				<a class="cta-btn" href="mailto:field@ezra.dev"
+				<a class="cta-btn" href="mailto:2495.immanuel@gmail.com"
 					>Book a Briefing <span class="arrow">→</span></a
 				>
 				<a class="cta-btn ghost" href="/docs">Read the Docs <span class="arrow">→</span></a>
 				<a class="cta-btn ghost" href="/quickstart">Quick Start <span class="arrow">→</span></a>
 			</div>
 			<div class="slide-ask-meta">
-				<span>field@ezra.dev</span>
+				<span>2495.immanuel@gmail.com</span>
 				<span>·</span>
 				<span>github.com/xavio2495/Ezra</span>
 				<span>·</span>
