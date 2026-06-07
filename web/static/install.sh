@@ -19,9 +19,6 @@
 # ============================================================================
 set -euo pipefail
 
-# --- make prompts work even when piped (curl | bash makes stdin the script) ---
-if [ ! -t 0 ] && [ -r /dev/tty ]; then exec </dev/tty; fi
-
 EZRA_REPO="${EZRA_REPO:-https://github.com/xavio2495/ezra.git}"
 EZRA_REF="${EZRA_REF:-main}"
 EZRA_DIR="${EZRA_DIR:-$HOME/ezra}"
@@ -66,10 +63,11 @@ gen_token() {
 banner() {
   printf '%s\n' "$C$B"
   cat <<'ART'
-   ___ _____ ____  ____
-  | __|_  / |  _ \|  _ \    Ezra — multi-agent platform
-  | _| / /| | |_) | |_) |   installer
-  |___/___|_|_.__/|____/
+    ███████ ███████ ██████   █████  
+    ██         ███  ██   ██ ██   ██ 
+    █████     ███   ██████  ███████ 
+    ██       ███    ██   ██ ██   ██ 
+    ███████ ███████ ██   ██ ██   ██                             
 ART
   printf '%s\n' "$R"
 }
@@ -461,4 +459,8 @@ main() {
   step "Thanks for installing Ezra."
   say "  Docs: ${B}https://ezra128.vercel.app/docs${R}   ·   Source: ${B}${EZRA_REPO%.git}${R}"
 }
-main "$@"
+
+# Read interactive answers from the terminal even when the script is piped (curl | bash
+# makes the pipe stdin). The redirect must apply to the main *call* — doing it earlier
+# would make bash read the rest of the script body from the tty and hang on a blank prompt.
+if [ ! -t 0 ] && [ -r /dev/tty ]; then main "$@" </dev/tty; else main "$@"; fi
