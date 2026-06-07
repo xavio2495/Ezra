@@ -1,12 +1,18 @@
-# Publish a PUBLIC Ezra Core image + the Helm chart to GitHub Container Registry
-# (GHCR) on a version tag. This is separate from deploy.yml (which deploys the
-# private GKE image). Auth is the built-in GITHUB_TOKEN — no GCP needed.
+# Publish the PUBLIC Ezra Core image + the Helm chart to GitHub Container Registry
+# (GHCR) and the slim `ezra-client` SDK to PyPI, on a version tag. This is separate
+# from deploy.yml (which deploys the private GKE image). GHCR auth is the built-in
+# GITHUB_TOKEN; PyPI uses Trusted Publishing (OIDC, no token) — no GCP needed.
 #
 #   git tag v0.1.0 && git push origin v0.1.0
 #
 # Consumers then:
 #   docker pull ghcr.io/<owner>/ezra-api:0.1.0
 #   helm install ezra oci://ghcr.io/<owner>/charts/ezra --version 0.1.0
+#   pip install ezra-client
+#
+# PyPI prerequisite (one-time): register a Trusted Publisher (or a "pending"
+# publisher for the not-yet-existing project) on PyPI for project `ezra-client`,
+# owner `xavio2495`, repo `Ezra`, workflow `publish.yml`. No API token needed.
 name: publish
 
 on:
@@ -75,3 +81,23 @@ jobs:
           helm registry login ghcr.io -u "${{ github.actor }}" -p "${{ secrets.GITHUB_TOKEN }}"
           helm package deploy/helm/ezra --version "$VER" --app-version "$VER"
           helm push "ezra-${VER}.tgz" "oci://ghcr.io/${{ github.repository_owner }}/charts"
+
+  # Publish the slim `ezra-client` SDK to PyPI via Trusted Publishing (OIDC).
+  # The package is versioned independently in clients/ezra-client/pyproject.toml;
+  # `skip-existing` makes re-tagging the same client version a no-op rather than a
+  # failure. Runs in parallel with the GHCR jobs (no dependency).
+  pypi:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # required for PyPI Trusted Publishing
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Build ezra-client
+        working-directory: clients/ezra-client
+        run: uv build
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: clients/ezra-client/dist/
+          skip-existing: true

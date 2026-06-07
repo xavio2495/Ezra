@@ -51,6 +51,6 @@ agents = [
 package = false
 
 [tool.pytest.ini_options]
-pythonpath = ["."]
+pythonpath = [".", "clients/ezra-client"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
