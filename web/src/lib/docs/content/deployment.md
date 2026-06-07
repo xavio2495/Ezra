@@ -1,6 +1,24 @@
 # Deployment
 
-Ezra Core and the agent fleet deploy on **Google Kubernetes Engine (GKE)**, keyless via Workload Identity Federation. (The original plan named Cloud Run; GKE was chosen to fit the dynamically-spawning multi-agent fleet, the Secret Manager CSI driver, and keyless WIF.) Three ways to stand it up, fastest first.
+Ezra Core and the agent fleet deploy on **Google Kubernetes Engine (GKE)**, keyless via Workload Identity Federation. (The original plan named Cloud Run; GKE was chosen to fit the dynamically-spawning multi-agent fleet, the Secret Manager CSI driver, and keyless WIF.) Several ways to stand it up, fastest first.
+
+## Published artifacts
+
+The Ezra Core image and Helm chart are published **publicly** to GitHub Container Registry — no auth needed to pull:
+
+```bash
+# the runtime image
+docker pull ghcr.io/xavio2495/ezra-api:0.1.0
+
+# the Helm chart (OCI)
+helm install ezra oci://ghcr.io/xavio2495/charts/ezra --version 0.1.0 \
+  --namespace ezra --create-namespace \
+  --set llm.provider=gemini \
+  --set secrets.values.mongodbUri='mongodb+srv://…' \
+  --set secrets.values.llmApiKey='…'
+```
+
+The chart's `image.repository` already defaults to `ghcr.io/xavio2495/ezra-api`, so the published image is pulled automatically. A new `v*` tag republishes both via the `publish` workflow.
 
 ## 1. One-command installer
 
@@ -12,9 +30,9 @@ curl -fsSL https://ezra128.vercel.app/install.sh | bash
 
 It's `curl|bash`-safe (prompts read from your terminal), needs no public image (it builds yours), and never creates billable resources without an explicit yes.
 
-## 2. Helm
+## 2. Helm (from source)
 
-If you already have a cluster, install the chart directly:
+If you already have a cluster and want to install the chart from a checkout (rather than the published OCI chart above):
 
 ```bash
 helm install ezra ./deploy/helm/ezra --namespace ezra --create-namespace \
