@@ -28,5 +28,11 @@
 		"tailwindcss": "^4.2.2",
 		"typescript": "^6.0.2",
 		"vite": "^8.0.7"
+	},
+	"dependencies": {
+		"@xyflow/svelte": "^1.6.0",
+		"highlight.js": "^11.11.1",
+		"marked": "^18.0.5",
+		"mermaid": "^11.15.0"
 	}
 }

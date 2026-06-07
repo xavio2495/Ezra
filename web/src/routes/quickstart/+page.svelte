@@ -39,26 +39,14 @@
 </svelte:head>
 
 <main class="qs-shell">
-
 	<!-- Sidebar -->
 	<aside class="qs-sidebar">
 		<div class="qs-sidebar-inner">
 			<div class="qs-sidebar-label">// Google Cloud ADK</div>
 			<ol class="qs-steps-nav">
-				{#each [
-					[1, 'Prerequisites'],
-					[2, 'Install Ezra'],
-					[3, 'Google Cloud Auth'],
-					[4, 'Configure Ezra'],
-					[5, 'First ADK Agent'],
-					[6, 'Run & Verify'],
-					[7, 'Next Steps'],
-				] as [n, label]}
+				{#each [[1, 'Prerequisites'], [2, 'Install Ezra'], [3, 'Google Cloud Auth'], [4, 'Configure Ezra'], [5, 'First ADK Agent'], [6, 'Run & Verify'], [7, 'Next Steps']] as [n, label]}
 					<li>
-						<a
-							href="#step-{n}"
-							class:active={activeStep === n}
-						>
+						<a href="#step-{n}" class:active={activeStep === n}>
 							<span class="qs-step-num">{n}</span>
 							{label}
 						</a>
@@ -70,15 +58,14 @@
 
 			<div class="qs-sidebar-links">
 				<a href="/docs">← Full Docs</a>
-				<a href="/docs#adk-service">ADK Service API</a>
-				<a href="/docs#rest-api">REST API</a>
+				<a href="/docs/sdk">Python SDK</a>
+				<a href="/docs/rest-api">REST API</a>
 			</div>
 		</div>
 	</aside>
 
 	<!-- Content -->
 	<div class="qs-content">
-
 		<!-- Header -->
 		<div class="qs-header">
 			<div class="qs-breadcrumb">
@@ -91,14 +78,14 @@
 			<h1>Google Cloud ADK<br /><em>Connector</em></h1>
 			<p class="qs-intro">
 				Get a multi-agent system running on Google Cloud with Ezra memory and belief tracking in
-				under 15 minutes. This guide uses Google ADK (Agent Development Kit) with Cloud Run,
-				Secret Manager, and MongoDB Atlas.
+				under 15 minutes. This guide uses Google ADK (Agent Development Kit) with GKE, Secret
+				Manager, and MongoDB Atlas.
 			</p>
 
 			<div class="qs-prereq-badge">
 				<span>⏱ ~15 min</span>
 				<span>·</span>
-				<span>Python 3.10+</span>
+				<span>Python 3.12</span>
 				<span>·</span>
 				<span>Google Cloud Project required</span>
 			</div>
@@ -114,11 +101,22 @@
 			<p>Before starting, ensure you have:</p>
 
 			<ul class="qs-checklist">
-				<li><span class="ck">✓</span> Python 3.10 or later</li>
-				<li><span class="ck">✓</span> <a href="https://cloud.google.com/sdk/docs/install" target="_blank" rel="noopener">Google Cloud SDK</a> (<code>gcloud</code>) installed and authenticated</li>
+				<li><span class="ck">✓</span> Python 3.12</li>
+				<li>
+					<span class="ck">✓</span>
+					<a href="https://cloud.google.com/sdk/docs/install" target="_blank" rel="noopener"
+						>Google Cloud SDK</a
+					>
+					(<code>gcloud</code>) installed and authenticated
+				</li>
 				<li><span class="ck">✓</span> A Google Cloud project with billing enabled</li>
 				<li><span class="ck">✓</span> A MongoDB Atlas cluster (free tier works for this guide)</li>
-				<li><span class="ck">✓</span> Redis — local Docker or <a href="https://cloud.google.com/memorystore" target="_blank" rel="noopener">Memorystore</a> on GCP</li>
+				<li>
+					<span class="ck">✓</span> Redis — local Docker or
+					<a href="https://cloud.google.com/memorystore" target="_blank" rel="noopener"
+						>Memorystore</a
+					> on GCP
+				</li>
 			</ul>
 
 			<div class="qs-callout">
@@ -126,10 +124,16 @@
 				<div class="qs-code-wrap">
 					<div class="qs-code-bar">
 						<span>bash</span>
-						<button onclick={(e) => copyText('gcloud services enable run.googleapis.com secretmanager.googleapis.com aiplatform.googleapis.com', e.currentTarget as HTMLButtonElement)}>Copy</button>
+						<button
+							onclick={(e) =>
+								copyText(
+									'gcloud services enable container.googleapis.com secretmanager.googleapis.com aiplatform.googleapis.com',
+									e.currentTarget as HTMLButtonElement
+								)}>Copy</button
+						>
 					</div>
 					<pre class="qs-code">gcloud services enable \
-  run.googleapis.com \
+  container.googleapis.com \
   secretmanager.googleapis.com \
   aiplatform.googleapis.com</pre>
 				</div>
@@ -148,9 +152,15 @@
 			<div class="qs-code-wrap">
 				<div class="qs-code-bar">
 					<span>bash</span>
-					<button onclick={(e) => copyText('pip install "ezra-platform[adk]"', e.currentTarget as HTMLButtonElement)}>Copy</button>
+					<button
+						onclick={(e) =>
+							copyText('pip install "ezra-platform[adk]"', e.currentTarget as HTMLButtonElement)}
+						>Copy</button
+					>
 				</div>
-				<pre class="qs-code"><span class="kw">pip install</span> <span class="str">"ezra-platform[adk]"</span></pre>
+				<pre class="qs-code"><span class="kw">pip install</span> <span class="str"
+						>"ezra-platform[adk]"</span
+					></pre>
 			</div>
 
 			<p>Verify the installation:</p>
@@ -158,9 +168,17 @@
 			<div class="qs-code-wrap">
 				<div class="qs-code-bar">
 					<span>bash</span>
-					<button onclick={(e) => copyText('python -c "import ezra_core; print(ezra_core.__version__)"', e.currentTarget as HTMLButtonElement)}>Copy</button>
+					<button
+						onclick={(e) =>
+							copyText(
+								'python -c "import ezra_core; print(ezra_core.__version__)"',
+								e.currentTarget as HTMLButtonElement
+							)}>Copy</button
+					>
 				</div>
-				<pre class="qs-code"><span class="kw">python</span> -c <span class="str">"import ezra_core; print(ezra_core.__version__)"</span>
+				<pre class="qs-code"><span class="kw">python</span> -c <span class="str"
+						>"import ezra_core; print(ezra_core.__version__)"</span
+					>
 <span class="cm"># Expected: 0.1.0</span></pre>
 			</div>
 		</section>
@@ -173,8 +191,8 @@
 			</div>
 
 			<p>
-				Create a service account for Ezra with the minimum required roles. Ezra uses this account
-				to read from Secret Manager and optionally write to Cloud Logging.
+				Create a service account for Ezra with the minimum required roles. Ezra uses this account to
+				read from Secret Manager and optionally write to Cloud Logging.
 			</p>
 
 			<div class="qs-code-wrap">
@@ -188,19 +206,24 @@ gcloud iam service-accounts create ezra-runtime \
 
 <span class="cm"># Grant Secret Manager access</span>
 gcloud projects add-iam-policy-binding <span class="str">$PROJECT_ID</span> \
-  --member=<span class="str">"serviceAccount:ezra-runtime@$PROJECT_ID.iam.gserviceaccount.com"</span> \
+  --member=<span class="str">"serviceAccount:ezra-runtime@$PROJECT_ID.iam.gserviceaccount.com"</span
+					> \
   --role=<span class="str">"roles/secretmanager.secretAccessor"</span>
 
-<span class="cm"># Download the key (for local dev only; use Workload Identity on Cloud Run)</span>
-gcloud iam service-accounts keys create ezra-key.json \
-  --iam-account=<span class="str">ezra-runtime@$PROJECT_ID.iam.gserviceaccount.com</span></pre>
+<span class="cm"
+						># Keyless: bind the GKE service account to this GSA (Workload Identity — no key files)</span
+					>
+gcloud iam service-accounts add-iam-policy-binding \
+  ezra-runtime@<span class="str">$PROJECT_ID</span>.iam.gserviceaccount.com \
+  --role=<span class="str">"roles/iam.workloadIdentityUser"</span> \
+  --member=<span class="str">"serviceAccount:$PROJECT_ID.svc.id.goog[ezra/ezra-api]"</span></pre>
 			</div>
 
 			<div class="qs-callout teal">
 				<span class="qs-callout-label">// Production</span>
-				On Cloud Run, use <strong>Workload Identity</strong> instead of key files. Set
-				<code>--service-account=ezra-runtime@...</code> on your Cloud Run service and skip
-				<code>GOOGLE_APPLICATION_CREDENTIALS</code>.
+				On GKE, use <strong>Workload Identity</strong> instead of key files. Annotate the Kubernetes
+				service account to impersonate <code>ezra-runtime@...</code> and skip
+				<code>GOOGLE_APPLICATION_CREDENTIALS</code> entirely — no key ever touches disk.
 			</div>
 
 			<p>Store your MongoDB URI and Redis URL in Secret Manager:</p>
@@ -210,7 +233,9 @@ gcloud iam service-accounts keys create ezra-key.json \
 					<span>bash</span>
 					<button onclick={(e) => copyText('', e.currentTarget as HTMLButtonElement)}>Copy</button>
 				</div>
-				<pre class="qs-code">printf <span class="str">"mongodb+srv://user:pass@cluster.mongodb.net"</span> | \
+				<pre class="qs-code">printf <span class="str"
+						>"mongodb+srv://user:pass@cluster.mongodb.net"</span
+					> | \
   gcloud secrets create EZRA_MONGO_URI --data-file=-
 
 printf <span class="str">"redis://10.0.0.1:6379"</span> | \
@@ -226,8 +251,8 @@ printf <span class="str">"redis://10.0.0.1:6379"</span> | \
 			</div>
 
 			<p>
-				Create a <code>.env</code> file for local development. In production these values are
-				pulled automatically from Secret Manager.
+				Create a <code>.env</code> file for local development. In production these values are pulled automatically
+				from Secret Manager.
 			</p>
 
 			<div class="qs-code-wrap">
@@ -259,8 +284,8 @@ EZRA_LOG_LEVEL=<span class="str">INFO</span></pre>
 			</div>
 
 			<p>
-				Create a simple ADK agent that uses Ezra for memory recall and belief tracking. This
-				pattern wraps any Google ADK agent with the <code>EzraService</code> adapter.
+				Create a simple ADK agent that uses Ezra for memory recall and belief tracking. This pattern
+				wraps any Google ADK agent with the <code>EzraService</code> adapter.
 			</p>
 
 			<div class="qs-code-wrap">
@@ -305,7 +330,7 @@ ezra = EzraService(
         )
 
 <span class="kw">async def</span> <span class="fn">main</span>():
-    agent = AnalystAgent(model=<span class="str">"gemini-2.0-flash"</span>)
+    agent = AnalystAgent(model=<span class="str">"gemini-3.5-flash"</span>)
 
     result = <span class="kw">await</span> agent.run(
         prompt=<span class="str">"Summarise Q1 2026 revenue trends and flag any anomalies."</span>,
@@ -313,7 +338,9 @@ ezra = EzraService(
     )
 
     print(result.content)
-    print(<span class="str">f"\nBelief snapshot ID: </span>&#123;result.belief_id&#125;<span class="str">"</span>)
+    print(<span class="str">f"\nBelief snapshot ID: </span>&#123;result.belief_id&#125;<span
+						class="str">"</span
+					>)
 
 asyncio.run(main())</pre>
 			</div>
@@ -331,7 +358,9 @@ asyncio.run(main())</pre>
 			<div class="qs-code-wrap">
 				<div class="qs-code-bar">
 					<span>bash</span>
-					<button onclick={(e) => copyText('python agent.py', e.currentTarget as HTMLButtonElement)}>Copy</button>
+					<button onclick={(e) => copyText('python agent.py', e.currentTarget as HTMLButtonElement)}
+						>Copy</button
+					>
 				</div>
 				<pre class="qs-code">python agent.py</pre>
 			</div>
@@ -341,11 +370,21 @@ asyncio.run(main())</pre>
 			<div class="qs-code-wrap">
 				<div class="qs-code-bar">
 					<span>bash</span>
-					<button onclick={(e) => copyText('curl http://localhost:8080/ezra/health', e.currentTarget as HTMLButtonElement)}>Copy</button>
+					<button
+						onclick={(e) =>
+							copyText(
+								'curl http://localhost:8080/ezra/health',
+								e.currentTarget as HTMLButtonElement
+							)}>Copy</button
+					>
 				</div>
 				<pre class="qs-code">curl http://localhost:8080/ezra/health
 <span class="cm"># Expected:</span>
-&#123; <span class="str">"status"</span>: <span class="str">"ok"</span>, <span class="str">"hot_tier"</span>: <span class="str">"connected"</span>, <span class="str">"cold_tier"</span>: <span class="str">"connected"</span> &#125;</pre>
+&#123; <span class="str">"status"</span>: <span class="str">"ok"</span>, <span class="str"
+						>"hot_tier"</span
+					>: <span class="str">"connected"</span>, <span class="str">"cold_tier"</span>: <span
+						class="str">"connected"</span
+					> &#125;</pre>
 			</div>
 
 			<p>Check that the belief was written to MongoDB:</p>
@@ -375,22 +414,31 @@ asyncio.run(main())</pre>
 			</div>
 
 			<div class="qs-next-grid">
-				<a href="/docs#replay" class="qs-next-card">
+				<a href="/docs/branching" class="qs-next-card">
 					<div class="qnc-tag">// Replay</div>
 					<h4>Branching Replay</h4>
-					<p>Reconstruct what the agent believed at any prior point. The compliance and root-cause tool.</p>
+					<p>
+						Reconstruct what the agent believed at any prior point. The compliance and root-cause
+						tool.
+					</p>
 				</a>
-				<a href="/docs#belief-system" class="qs-next-card">
+				<a href="/docs/beliefs" class="qs-next-card">
 					<div class="qnc-tag">// Beliefs</div>
 					<h4>Belief System</h4>
-					<p>Configure reconciliation strategies. Set up custom resolvers for conflicting agent beliefs.</p>
+					<p>
+						Configure reconciliation strategies. Set up custom resolvers for conflicting agent
+						beliefs.
+					</p>
 				</a>
-				<a href="/docs#memory-tiers" class="qs-next-card">
+				<a href="/docs/memory" class="qs-next-card">
 					<div class="qnc-tag">// Memory</div>
 					<h4>Memory Tiers</h4>
-					<p>Tune eviction schedules, salience thresholds, and warm-tier compaction for your workload.</p>
+					<p>
+						Tune eviction schedules, salience thresholds, and warm-tier compaction for your
+						workload.
+					</p>
 				</a>
-				<a href="/docs#federation" class="qs-next-card">
+				<a href="/docs/federation" class="qs-next-card">
 					<div class="qnc-tag">// Federation</div>
 					<h4>Add More Connectors</h4>
 					<p>Connect Snowflake, BigQuery, and REST sources for pushdown federated queries.</p>
@@ -402,7 +450,6 @@ asyncio.run(main())</pre>
 				<a class="cta-btn ghost" href="mailto:field@ezra.dev">Get Support</a>
 			</div>
 		</section>
-
 	</div>
 </main>
 
@@ -424,7 +471,9 @@ asyncio.run(main())</pre>
 		border-right: 1px solid var(--line);
 		background: rgba(7, 23, 26, 0.5);
 	}
-	.qs-sidebar-inner { padding: 36px 20px; }
+	.qs-sidebar-inner {
+		padding: 36px 20px;
+	}
 	.qs-sidebar-label {
 		font-family: var(--f-mono);
 		font-size: 9.5px;
@@ -452,10 +501,18 @@ asyncio.run(main())</pre>
 		color: var(--fg-3);
 		text-decoration: none;
 		border-radius: 2px;
-		transition: color 0.15s, background 0.15s;
+		transition:
+			color 0.15s,
+			background 0.15s;
 	}
-	.qs-steps-nav a:hover { color: var(--fg); background: rgba(45,199,184,0.05); }
-	.qs-steps-nav a:global(.active) { color: var(--accent); background: rgba(45,199,184,0.08); }
+	.qs-steps-nav a:hover {
+		color: var(--fg);
+		background: rgba(45, 199, 184, 0.05);
+	}
+	.qs-steps-nav a:global(.active) {
+		color: var(--accent);
+		background: rgba(45, 199, 184, 0.08);
+	}
 
 	.qs-step-num {
 		width: 20px;
@@ -470,10 +527,21 @@ asyncio.run(main())</pre>
 		flex-shrink: 0;
 		color: var(--fg-4);
 	}
-	:global(.active) .qs-step-num { border-color: var(--accent); color: var(--accent); }
+	:global(.active) .qs-step-num {
+		border-color: var(--accent);
+		color: var(--accent);
+	}
 
-	.qs-sidebar-sep { height: 1px; background: var(--line); margin: 24px 0; }
-	.qs-sidebar-links { display: flex; flex-direction: column; gap: 6px; }
+	.qs-sidebar-sep {
+		height: 1px;
+		background: var(--line);
+		margin: 24px 0;
+	}
+	.qs-sidebar-links {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+	}
 	.qs-sidebar-links a {
 		font-family: var(--f-mono);
 		font-size: 11px;
@@ -482,10 +550,15 @@ asyncio.run(main())</pre>
 		padding: 4px 10px;
 		transition: color 0.15s;
 	}
-	.qs-sidebar-links a:hover { color: var(--accent); }
+	.qs-sidebar-links a:hover {
+		color: var(--accent);
+	}
 
 	/* ── Content ── */
-	.qs-content { padding: 52px 80px 120px; max-width: 820px; }
+	.qs-content {
+		padding: 52px 80px 120px;
+		max-width: 820px;
+	}
 
 	.qs-breadcrumb {
 		display: flex;
@@ -498,11 +571,18 @@ asyncio.run(main())</pre>
 		color: var(--fg-4);
 		margin-bottom: 40px;
 	}
-	.qs-breadcrumb a { color: var(--fg-4); text-decoration: none; }
-	.qs-breadcrumb a:hover { color: var(--accent); }
+	.qs-breadcrumb a {
+		color: var(--fg-4);
+		text-decoration: none;
+	}
+	.qs-breadcrumb a:hover {
+		color: var(--accent);
+	}
 
 	/* ── Header ── */
-	.qs-header { margin-bottom: 60px; }
+	.qs-header {
+		margin-bottom: 60px;
+	}
 	h1 {
 		margin: 0 0 16px;
 		font-family: var(--f-sans);
@@ -513,9 +593,21 @@ asyncio.run(main())</pre>
 		line-height: 0.95;
 		color: var(--fg);
 	}
-	h1 em { font-family: var(--f-display); font-style: italic; font-weight: 400; text-transform: none; color: var(--accent); }
+	h1 em {
+		font-family: var(--f-display);
+		font-style: italic;
+		font-weight: 400;
+		text-transform: none;
+		color: var(--accent);
+	}
 
-	.qs-intro { font-size: 14.5px; line-height: 1.7; color: var(--fg-2); max-width: 58ch; margin: 0 0 24px; }
+	.qs-intro {
+		font-size: 14.5px;
+		line-height: 1.7;
+		color: var(--fg-2);
+		max-width: 58ch;
+		margin: 0 0 24px;
+	}
 
 	.qs-prereq-badge {
 		display: inline-flex;
@@ -536,7 +628,10 @@ asyncio.run(main())</pre>
 		border-top: 1px solid var(--line-2);
 		scroll-margin-top: calc(var(--nav-h) + 20px);
 	}
-	.qs-section:first-of-type { border-top: 0; padding-top: 0; }
+	.qs-section:first-of-type {
+		border-top: 0;
+		padding-top: 0;
+	}
 
 	.qs-step-label {
 		display: flex;
@@ -562,11 +657,30 @@ asyncio.run(main())</pre>
 		color: var(--fg);
 	}
 
-	p { margin: 0 0 16px; font-size: 13.5px; color: var(--fg-3); line-height: 1.7; }
-	a { color: var(--accent); text-decoration: none; }
-	a:hover { text-decoration: underline; }
-	code { font-family: var(--f-mono); font-size: 12px; color: var(--accent-2); background: rgba(45,199,184,0.08); padding: 2px 6px; border-radius: 2px; }
-	strong { color: var(--fg); }
+	p {
+		margin: 0 0 16px;
+		font-size: 13.5px;
+		color: var(--fg-3);
+		line-height: 1.7;
+	}
+	a {
+		color: var(--accent);
+		text-decoration: none;
+	}
+	a:hover {
+		text-decoration: underline;
+	}
+	code {
+		font-family: var(--f-mono);
+		font-size: 12px;
+		color: var(--accent-2);
+		background: rgba(45, 199, 184, 0.08);
+		padding: 2px 6px;
+		border-radius: 2px;
+	}
+	strong {
+		color: var(--fg);
+	}
 
 	/* ── Checklist ── */
 	.qs-checklist {
@@ -586,7 +700,11 @@ asyncio.run(main())</pre>
 		color: var(--fg-3);
 		line-height: 1.6;
 	}
-	.ck { color: var(--accent); font-size: 12px; flex-shrink: 0; }
+	.ck {
+		color: var(--accent);
+		font-size: 12px;
+		flex-shrink: 0;
+	}
 
 	/* ── Code blocks ── */
 	.qs-code-wrap {
@@ -618,7 +736,10 @@ asyncio.run(main())</pre>
 		cursor: pointer;
 		transition: all 0.2s;
 	}
-	.qs-code-bar button:hover { border-color: var(--accent); color: var(--accent); }
+	.qs-code-bar button:hover {
+		border-color: var(--accent);
+		color: var(--accent);
+	}
 
 	.qs-code {
 		margin: 0;
@@ -630,10 +751,19 @@ asyncio.run(main())</pre>
 		overflow-x: auto;
 		white-space: pre;
 	}
-	.qs-code :global(.kw)  { color: var(--accent); }
-	.qs-code :global(.str) { color: var(--accent-2); }
-	.qs-code :global(.cm)  { color: var(--fg-4); font-style: italic; }
-	.qs-code :global(.fn)  { color: var(--fg); }
+	.qs-code :global(.kw) {
+		color: var(--accent);
+	}
+	.qs-code :global(.str) {
+		color: var(--accent-2);
+	}
+	.qs-code :global(.cm) {
+		color: var(--fg-4);
+		font-style: italic;
+	}
+	.qs-code :global(.fn) {
+		color: var(--fg);
+	}
 
 	/* ── Callout ── */
 	.qs-callout {
@@ -646,7 +776,10 @@ asyncio.run(main())</pre>
 		line-height: 1.65;
 		color: var(--fg-3);
 	}
-	.qs-callout.teal { border-left-color: var(--accent); background: rgba(45, 199, 184, 0.04); }
+	.qs-callout.teal {
+		border-left-color: var(--accent);
+		background: rgba(45, 199, 184, 0.04);
+	}
 	.qs-callout-label {
 		display: block;
 		font-size: 9.5px;
@@ -655,7 +788,9 @@ asyncio.run(main())</pre>
 		color: var(--fg-4);
 		margin-bottom: 8px;
 	}
-	.qs-callout.teal .qs-callout-label { color: var(--accent); }
+	.qs-callout.teal .qs-callout-label {
+		color: var(--accent);
+	}
 
 	/* ── Next steps grid ── */
 	.qs-next-grid {
@@ -672,15 +807,45 @@ asyncio.run(main())</pre>
 		text-decoration: none;
 		transition: background 0.2s;
 	}
-	.qs-next-card:nth-child(odd) { border-left: 0; }
-	.qs-next-card:nth-child(n+3) { border-bottom: 0; }
-	.qs-next-card:hover { background: rgba(45,199,184,0.04); }
-	.qnc-tag { font-family: var(--f-mono); font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--accent); margin-bottom: 8px; }
-	.qs-next-card h4 { margin: 0 0 6px; font-family: var(--f-sans); font-weight: 500; font-size: 15px; text-transform: uppercase; letter-spacing: 0.01em; color: var(--fg); }
-	.qs-next-card p { margin: 0; font-size: 12px; color: var(--fg-4); line-height: 1.6; }
+	.qs-next-card:nth-child(odd) {
+		border-left: 0;
+	}
+	.qs-next-card:nth-child(n + 3) {
+		border-bottom: 0;
+	}
+	.qs-next-card:hover {
+		background: rgba(45, 199, 184, 0.04);
+	}
+	.qnc-tag {
+		font-family: var(--f-mono);
+		font-size: 10px;
+		letter-spacing: 0.18em;
+		text-transform: uppercase;
+		color: var(--accent);
+		margin-bottom: 8px;
+	}
+	.qs-next-card h4 {
+		margin: 0 0 6px;
+		font-family: var(--f-sans);
+		font-weight: 500;
+		font-size: 15px;
+		text-transform: uppercase;
+		letter-spacing: 0.01em;
+		color: var(--fg);
+	}
+	.qs-next-card p {
+		margin: 0;
+		font-size: 12px;
+		color: var(--fg-4);
+		line-height: 1.6;
+	}
 
 	/* ── Final CTA ── */
-	.qs-final-cta { display: flex; gap: 14px; flex-wrap: wrap; }
+	.qs-final-cta {
+		display: flex;
+		gap: 14px;
+		flex-wrap: wrap;
+	}
 	.cta-btn {
 		display: inline-flex;
 		align-items: center;
@@ -697,21 +862,56 @@ asyncio.run(main())</pre>
 		font-weight: 600;
 		transition: all 0.2s;
 	}
-	.cta-btn:hover { background: var(--fg); color: var(--bg); }
-	.cta-btn.ghost { border-color: var(--line); }
-	.cta-btn.ghost:hover { border-color: var(--fg); background: transparent; }
-	.arrow { font-size: 14px; }
+	.cta-btn:hover {
+		background: var(--fg);
+		color: var(--bg);
+	}
+	.cta-btn.ghost {
+		border-color: var(--line);
+	}
+	.cta-btn.ghost:hover {
+		border-color: var(--fg);
+		background: transparent;
+	}
+	.arrow {
+		font-size: 14px;
+	}
 
 	/* ── Responsive ── */
 	@media (max-width: 900px) {
-		.qs-shell { grid-template-columns: 1fr; }
-		.qs-sidebar { position: relative; top: 0; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
-		.qs-sidebar-inner { padding: 20px; }
-		.qs-steps-nav { flex-direction: row; flex-wrap: wrap; }
-		.qs-content { padding: 32px 24px 80px; max-width: 100%; }
-		.qs-next-grid { grid-template-columns: 1fr; }
-		.qs-next-card { border-left: 0; border-bottom: 1px solid var(--line); }
-		.qs-next-card:nth-child(n+3) { border-bottom: 1px solid var(--line); }
-		.qs-next-card:last-child { border-bottom: 0; }
+		.qs-shell {
+			grid-template-columns: 1fr;
+		}
+		.qs-sidebar {
+			position: relative;
+			top: 0;
+			height: auto;
+			border-right: 0;
+			border-bottom: 1px solid var(--line);
+		}
+		.qs-sidebar-inner {
+			padding: 20px;
+		}
+		.qs-steps-nav {
+			flex-direction: row;
+			flex-wrap: wrap;
+		}
+		.qs-content {
+			padding: 32px 24px 80px;
+			max-width: 100%;
+		}
+		.qs-next-grid {
+			grid-template-columns: 1fr;
+		}
+		.qs-next-card {
+			border-left: 0;
+			border-bottom: 1px solid var(--line);
+		}
+		.qs-next-card:nth-child(n + 3) {
+			border-bottom: 1px solid var(--line);
+		}
+		.qs-next-card:last-child {
+			border-bottom: 0;
+		}
 	}
 </style>

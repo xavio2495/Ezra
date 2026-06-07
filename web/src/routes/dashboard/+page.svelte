@@ -404,7 +404,7 @@
 			Illustrative simulation. The real dashboard reads live runtime state over the REST surface (<code
 				>/ezra/health</code
 			>, <code>/ezra/belief/snapshot</code>,
-			<code>/ezra/branch/diff</code>). See the <a href="/docs#rest-api">REST API</a>.
+			<code>/ezra/branch/diff</code>). See the <a href="/docs/rest-api">REST API</a>.
 		</p>
 	</section>
 </main>

@@ -20,8 +20,8 @@
 			<h6>Developers</h6>
 			<ul>
 				<li><a href="/quickstart">Quickstart</a></li>
-				<li><a href="/docs#python-sdk">Python SDK</a></li>
-				<li><a href="/docs#rest-api">REST API</a></li>
+				<li><a href="/docs/sdk">Python SDK</a></li>
+				<li><a href="/docs/rest-api">REST API</a></li>
 				<li><a href="https://github.com/xavio2495/ezra" target="_blank" rel="noopener">GitHub</a></li>
 			</ul>
 		</div>

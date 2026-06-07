@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import SessionGraphFlow from '$lib/components/SessionGraphFlow.svelte';
 
 	function copyText(text: string, btn: HTMLButtonElement) {
 		navigator.clipboard.writeText(text).then(() => {
@@ -64,7 +65,8 @@
 			<button
 				class="hi-copy"
 				onclick={(e) => copyText('pip install ezra-platform', e.currentTarget as HTMLButtonElement)}
-			>Copy</button>
+				>Copy</button
+			>
 		</div>
 
 		<div class="hero-actions-v2">
@@ -126,18 +128,19 @@
 					class="cp-btn"
 					onclick={(e) =>
 						copyText('pip install ezra-platform', e.currentTarget as HTMLButtonElement)}
-				>Copy</button>
+					>Copy</button
+				>
 			</div>
 
 			<div class="terminal-step">
 				<div class="ts-n">2</div>
 				<div>
 					<div class="ts-label">Configure</div>
-					<div class="ts-code"><span class="kw">from</span> ezra_core <span class="kw">import</span> Ezra
-
-ezra = Ezra.from_env(
-    session_graph_id=<span class="str">"my-session"</span>
-)</div>
+					<div class="ts-code">
+						<span class="kw">from</span> ezra_core <span class="kw">import</span> Ezra ezra =
+						Ezra.from_env( session_graph_id=<span class="str">"my-session"</span>
+						)
+					</div>
 				</div>
 				<button
 					class="cp-btn"
@@ -145,31 +148,38 @@ ezra = Ezra.from_env(
 						copyText(
 							`from ezra_core import Ezra\nezra = Ezra.from_env(session_graph_id="my-session")`,
 							e.currentTarget as HTMLButtonElement
-						)}
-				>Copy</button>
+						)}>Copy</button
+				>
 			</div>
 
 			<div class="terminal-step">
 				<div class="ts-n">3</div>
 				<div>
 					<div class="ts-label">Run</div>
-					<div class="ts-code">response = <span class="kw">await</span> ezra.complete(
-    agent_id=<span class="str">"supply_chain"</span>,
-    permission_scope=[<span class="str">"inventory"</span>, <span class="str">"logistics"</span>],
-    messages=[&#123;<span class="str">"role"</span>: <span class="str">"user"</span>, <span class="str">"content"</span>: <span class="str">"..."</span>&#125;],
-    sources=[<span class="str">"mongodb://cluster/inventory"</span>],
-)</div>
+					<div class="ts-code">
+						response = <span class="kw">await</span> ezra.complete( agent_id=<span class="str"
+							>"supply_chain"</span
+						>, permission_scope=[<span class="str">"inventory"</span>,
+						<span class="str">"logistics"</span>], messages=[&#123;<span class="str">"role"</span>:
+						<span class="str">"user"</span>, <span class="str">"content"</span>:
+						<span class="str">"..."</span>&#125;], sources=[<span class="str"
+							>"mongodb://cluster/inventory"</span
+						>], )
+					</div>
 				</div>
 				<button
 					class="cp-btn"
 					onclick={(e) =>
 						copyText('response = await ezra.complete(...)', e.currentTarget as HTMLButtonElement)}
-				>Copy</button>
+					>Copy</button
+				>
 			</div>
 		</div>
 
 		<div style="text-align: center; margin-top: 40px;">
-			<a class="cta-btn teal" href="/quickstart">Full Setup Guide — Google Cloud ADK <span class="arrow">→</span></a>
+			<a class="cta-btn teal" href="/quickstart"
+				>Full Setup Guide — Google Cloud ADK <span class="arrow">→</span></a
+			>
 		</div>
 	</section>
 
@@ -191,16 +201,16 @@ ezra = Ezra.from_env(
 				<div class="fc-tag">// Federation</div>
 				<h3>Pushdown <em>Data</em> Access</h3>
 				<p>
-					Connect to MongoDB, Snowflake, BigQuery, REST. The database does the math — the model
-					gets typed summaries with provenance, never raw dumps.
+					Connect to MongoDB, Snowflake, BigQuery, REST. The database does the math — the model gets
+					typed summaries with provenance, never raw dumps.
 				</p>
 			</div>
 			<div class="fg-card">
 				<div class="fc-tag">// Memory</div>
 				<h3>Three-Tier <em>Recall</em></h3>
 				<p>
-					Hot, warm, cold. Automatic eviction, compaction, and salience-ranked hydration. Each
-					agent gets the most relevant slice of what the fleet has ever known.
+					Hot, warm, cold. Automatic eviction, compaction, and salience-ranked hydration. Each agent
+					gets the most relevant slice of what the fleet has ever known.
 				</p>
 			</div>
 			<div class="fg-card">
@@ -259,36 +269,68 @@ ezra = Ezra.from_env(
 			</div>
 			<div class="router-v2-steps">
 				<div class="rv2-step">
-					<div class="rn">01</div><div class="rl">Parse</div><div class="rd">Intent · entities</div>
+					<div class="rn">01</div>
+					<div class="rl">Parse</div>
+					<div class="rd">Intent · entities</div>
 				</div>
 				<div class="rv2-step">
-					<div class="rn">02</div><div class="rl">Policy</div><div class="rd">Scope check</div>
+					<div class="rn">02</div>
+					<div class="rl">Policy</div>
+					<div class="rd">Scope check</div>
 				</div>
 				<div class="rv2-step">
-					<div class="rn">03</div><div class="rl">Belief</div><div class="rd">Reconcile</div>
+					<div class="rn">03</div>
+					<div class="rl">Belief</div>
+					<div class="rd">Reconcile</div>
 				</div>
 				<div class="rv2-step">
-					<div class="rn">04</div><div class="rl">Hydrate</div><div class="rd">Memory pull</div>
+					<div class="rn">04</div>
+					<div class="rl">Hydrate</div>
+					<div class="rd">Memory pull</div>
 				</div>
 				<div class="rv2-step">
-					<div class="rn">05</div><div class="rl">Fetch</div><div class="rd">Mesh decision</div>
+					<div class="rn">05</div>
+					<div class="rl">Fetch</div>
+					<div class="rd">Mesh decision</div>
 				</div>
 				<div class="rv2-step">
-					<div class="rn">06</div><div class="rl">Assemble</div><div class="rd">Context build</div>
+					<div class="rn">06</div>
+					<div class="rl">Assemble</div>
+					<div class="rd">Context build</div>
 				</div>
 				<div class="rv2-step">
-					<div class="rn">07</div><div class="rl">Call</div><div class="rd">LLM via litellm</div>
+					<div class="rn">07</div>
+					<div class="rl">Call</div>
+					<div class="rd">LLM via litellm</div>
 				</div>
 				<div class="rv2-step">
-					<div class="rn">08</div><div class="rl">Write</div><div class="rd">Beliefs · trace</div>
+					<div class="rn">08</div>
+					<div class="rl">Write</div>
+					<div class="rd">Beliefs · trace</div>
 				</div>
 			</div>
 			<div class="router-note">
 				<strong>Most agent platforms only do steps 1, 7, and 8.</strong>
-				Steps 2–6 are where Ezra differs — <em>policy enforcement, belief reconciliation,
-				scope-filtered memory, pushdown federation, and salience-ranked assembly</em> all happen
-				before the model is called.
+				Steps 2–6 are where Ezra differs —
+				<em
+					>policy enforcement, belief reconciliation, scope-filtered memory, pushdown federation,
+					and salience-ranked assembly</em
+				> all happen before the model is called.
 			</div>
+		</div>
+
+		<!-- Interactive session graph -->
+		<div class="sh-center reveal" style="margin-top: 100px;">
+			<div class="section-label">Session graph</div>
+			<h2>A fleet that <em>spawns</em><br />and shares.</h2>
+			<p class="lede">
+				One session graph binds N agents — spawned and terminated as the operation needs. Each has
+				its own scoped view, but they share one belief store and one tiered memory. Drag, pan, and
+				zoom the graph below.
+			</p>
+		</div>
+		<div class="reveal" style="margin-top: 40px;">
+			<SessionGraphFlow />
 		</div>
 
 		<!-- Memory tiers -->
@@ -364,35 +406,50 @@ ezra = Ezra.from_env(
 				<div class="dn">i.</div>
 				<div>
 					<h4 class="dt">Pushdown execution</h4>
-					<span class="dd">The database does the math. Typed queries to MongoDB, Snowflake, BigQuery — the model never touches raw rows.</span>
+					<span class="dd"
+						>The database does the math. Typed queries to MongoDB, Snowflake, BigQuery — the model
+						never touches raw rows.</span
+					>
 				</div>
 			</div>
 			<div class="diff-row">
 				<div class="dn">ii.</div>
 				<div>
 					<h4 class="dt">Versioned belief audit</h4>
-					<span class="dd">Every commitment any agent made, every fact it relied on, attributed by agent_id. Queryable and exportable at any timestamp.</span>
+					<span class="dd"
+						>Every commitment any agent made, every fact it relied on, attributed by agent_id.
+						Queryable and exportable at any timestamp.</span
+					>
 				</div>
 			</div>
 			<div class="diff-row">
 				<div class="dn">iii.</div>
 				<div>
 					<h4 class="dt">Branching replay</h4>
-					<span class="dd">Reconstruct any agent's view. Mutate state. Run forward with a new model or policy. Diff branches. The compliance and eval surface.</span>
+					<span class="dd"
+						>Reconstruct any agent's view. Mutate state. Run forward with a new model or policy.
+						Diff branches. The compliance and eval surface.</span
+					>
 				</div>
 			</div>
 			<div class="diff-row">
 				<div class="dn">iv.</div>
 				<div>
 					<h4 class="dt">Time-travel federated query</h4>
-					<span class="dd">Run any query as of any prior timestamp. Source-native where it exists. Best-effort with explicit provenance where it does not.</span>
+					<span class="dd"
+						>Run any query as of any prior timestamp. Source-native where it exists. Best-effort
+						with explicit provenance where it does not.</span
+					>
 				</div>
 			</div>
 			<div class="diff-row">
 				<div class="dn">v.</div>
 				<div>
 					<h4 class="dt">Cross-agent reconciliation</h4>
-					<span class="dd">When agents commit conflicting beliefs, four strategies resolve it: last-write, highest-trust, manual escalation, or a custom application-defined resolver.</span>
+					<span class="dd"
+						>When agents commit conflicting beliefs, four strategies resolve it: last-write,
+						highest-trust, manual escalation, or a custom application-defined resolver.</span
+					>
 				</div>
 			</div>
 		</div>
@@ -419,13 +476,14 @@ ezra = Ezra.from_env(
 					Direct Python integration for agents built with Google ADK. No MCP indirection. Best for
 					production fleets on Google Cloud.
 				</p>
-				<div class="code-block"><span class="c-key">from</span> ezra.adk_service <span class="c-key">import</span> EzraService
-
-svc = EzraService(
-  session_graph_id=<span class="c-str">"race-weekend"</span>
-)
-ctx = svc.<span class="c-fn">recall</span>(agent_id=<span class="c-str">"tyre_eng"</span>)
-svc.<span class="c-fn">belief_check</span>(claim=<span class="c-str">"soft optimal"</span>)</div>
+				<div class="code-block">
+					<span class="c-key">from</span> ezra.adk_service <span class="c-key">import</span>
+					EzraService svc = EzraService( session_graph_id=<span class="c-str">"race-weekend"</span>
+					) ctx = svc.<span class="c-fn">recall</span>(agent_id=<span class="c-str">"tyre_eng"</span
+					>) svc.<span class="c-fn">belief_check</span>(claim=<span class="c-str"
+						>"soft optimal"</span
+					>)
+				</div>
 			</div>
 
 			<div class="int-card">
@@ -435,33 +493,36 @@ svc.<span class="c-fn">belief_check</span>(claim=<span class="c-str">"soft optim
 					Six methods for LangGraph, LangChain, or any custom framework. Adopt belief audit alone,
 					or memory, or replay.
 				</p>
-				<div class="code-block"><span class="c-key">from</span> ezra_core <span class="c-key">import</span> Ezra
-
-ezra = Ezra.from_env(
-  session_graph_id=<span class="c-str">"incident-triage"</span>
-)
-<span class="c-key">await</span> ezra.complete(
-  agent_id=<span class="c-str">"triage"</span>,
-  messages=[...],
-)</div>
+				<div class="code-block">
+					<span class="c-key">from</span> ezra_core <span class="c-key">import</span> Ezra ezra =
+					Ezra.from_env( session_graph_id=<span class="c-str">"incident-triage"</span>
+					)
+					<span class="c-key">await</span> ezra.complete( agent_id=<span class="c-str"
+						>"triage"</span
+					>, messages=[...], )
+				</div>
 			</div>
 
 			<div class="int-card">
 				<div class="it-tag">// Path 03</div>
 				<div class="it-name">REST <em>API</em></div>
 				<p class="it-desc">
-					Nine endpoints. Bearer or OIDC auth. Use from any language or external system.
+					Thirteen endpoints. Bearer or OIDC auth. Use from any language or external system.
 				</p>
-				<div class="code-block"><span class="c-com"># Nine endpoints</span>
-POST /ezra/belief/<span class="c-key">check</span>
-POST /ezra/belief/<span class="c-key">snapshot</span>
-POST /ezra/mesh/<span class="c-key">query</span>
-POST /ezra/context/<span class="c-key">assemble</span>
-POST /ezra/<span class="c-key">replay</span>
-POST /ezra/<span class="c-key">branch</span>
-POST /ezra/branch/<span class="c-key">run-forward</span>
-POST /ezra/branch/<span class="c-key">diff</span>
-GET  /ezra/<span class="c-key">health</span></div>
+				<div class="code-block">
+					<span class="c-com"># Thirteen endpoints</span>
+					POST /ezra/belief/<span class="c-key">check</span>
+					POST /ezra/belief/<span class="c-key">snapshot</span>
+					POST /ezra/mesh/<span class="c-key">query</span>
+					POST /ezra/<span class="c-key">commit</span>
+					POST /ezra/<span class="c-key">recall</span>
+					POST /ezra/<span class="c-key">rewind</span>
+					POST /ezra/<span class="c-key">revert</span>
+					POST /ezra/<span class="c-key">replay</span>
+					POST /ezra/<span class="c-key">branch</span>
+					POST /ezra/branch/<span class="c-key">diff</span>
+					GET /ezra/<span class="c-key">health</span>
+				</div>
 			</div>
 		</div>
 
@@ -483,22 +544,40 @@ GET  /ezra/<span class="c-key">health</span></div>
 			<div class="bv2">
 				<div class="bv2-who">// AI Platform Engineer</div>
 				<div class="bv2-q">"One platform. One audit trail. Any number of agents."</div>
-				<p>Wins back weeks of glue code per agent. Federation, memory, and belief tracking for the entire fleet.</p>
+				<p>
+					Wins back weeks of glue code per agent. Federation, memory, and belief tracking for the
+					entire fleet.
+				</p>
 			</div>
 			<div class="bv2">
 				<div class="bv2-who">// Enterprise Security</div>
-				<div class="bv2-q">"Agents inherit user identity. The wrong agent never sees wrong data."</div>
-				<p>Per-agent permission scopes enforced on every query and fetch. The security chokepoint for the fleet.</p>
+				<div class="bv2-q">
+					"Agents inherit user identity. The wrong agent never sees wrong data."
+				</div>
+				<p>
+					Per-agent permission scopes enforced on every query and fetch. The security chokepoint for
+					the fleet.
+				</p>
 			</div>
 			<div class="bv2">
 				<div class="bv2-who">// Compliance Officer</div>
-				<div class="bv2-q">"Every fact, every source, every permission — queryable and replayable."</div>
-				<p>The belief history is the SOC2, GDPR, and financial-audit artifact. Branching replay is the root-cause tool.</p>
+				<div class="bv2-q">
+					"Every fact, every source, every permission — queryable and replayable."
+				</div>
+				<p>
+					The belief history is the SOC2, GDPR, and financial-audit artifact. Branching replay is
+					the root-cause tool.
+				</p>
 			</div>
 			<div class="bv2">
 				<div class="bv2-who">// CTO</div>
-				<div class="bv2-q">"Smallest context per call. Lower tokens, lower latency, at 100+ agents."</div>
-				<p>Performance stays flat as the fleet scales. Constant per-agent latency, linear total throughput. Provable.</p>
+				<div class="bv2-q">
+					"Smallest context per call. Lower tokens, lower latency, at 100+ agents."
+				</div>
+				<p>
+					Performance stays flat as the fleet scales. Constant per-agent latency, linear total
+					throughput. Provable.
+				</p>
 			</div>
 		</div>
 	</section>
@@ -522,7 +601,11 @@ GET  /ezra/<span class="c-key">health</span></div>
 		<div class="final-meta reveal-stagger" style="margin-top: 80px;">
 			<div class="fm">
 				<h5>// Repo</h5>
-				<p><a href="https://github.com/xavio2495/ezra" target="_blank" rel="noopener">github.com/xavio2495/ezra</a></p>
+				<p>
+					<a href="https://github.com/xavio2495/ezra" target="_blank" rel="noopener"
+						>github.com/xavio2495/ezra</a
+					>
+				</p>
 			</div>
 			<div class="fm">
 				<h5>// Docs</h5>
