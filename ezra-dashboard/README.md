@@ -1,42 +1,25 @@
-# sv
+# Ezra Live Demo Dashboard
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+The presenter-facing UI for the [Demo Conductor](../demo/conductor/): six interactive
+agent chat panes driving real per-agent Ezra turns, beside real-time visualizers
+(context/commitment graph, data-access ledger, audit log) rendered **only** from the
+platform's persisted `AuditEvent` feed.
 
-## Creating a project
+SvelteKit · Svelte 5 runes · Tailwind v4 · shadcn-svelte · `@xyflow/svelte`.
 
-If you're seeing this, you've probably already done this step. Congrats!
+## Develop
 
-```sh
-# create a new project
-npx sv create my-app
+```bash
+# 1. the conductor (from the repo root; offline mode, port 8090)
+docker compose run --rm --no-deps -p 8090:8090 app uv run --frozen python -m demo.conductor
+
+# 2. this app, pointed at it
+VITE_CONDUCTOR_URL=http://localhost:8090 npm run dev
 ```
 
-To recreate this project with the same configuration:
+Click **▷ Start** to spawn the fleet, prompt agents through the pre-filled briefings
+(race_strategy first, tyre_engineer second to fire the contradiction on cue), and
+drive Rewind / Revert / Branch from the control strip.
 
-```sh
-# recreate this project
-npx sv@0.16.1 create --template minimal --types ts --install npm ezra-dashboard
-```
-
-## Developing
-
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
-
-```sh
-npm run dev
-
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
-```
-
-## Building
-
-To create a production version of your app:
-
-```sh
-npm run build
-```
-
-You can preview the production build with `npm run preview`.
-
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+`npm run check` must stay at 0 errors. In production the conductor serves this app
+from its own origin on GKE (no `VITE_CONDUCTOR_URL` needed).

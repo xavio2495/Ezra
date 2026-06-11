@@ -151,11 +151,11 @@
 			<div class="idx">// Operations</div>
 			<h2>Recorded <em>operations</em> dashboard</h2>
 			<p class="lede">
-				A real session graph, captured end-to-end from a live <b>google.adk</b> fleet run on GKE —
-				Vertex Gemini agents reasoning over MongoDB Atlas, Snowflake, and BigQuery. Every number
-				below is read back from the runtime: the agents and their scopes, the append-only belief
-				log, the contradiction that genuinely fired and how trust resolved it, the federated
-				fetches, and a counterfactual branch. Nothing here is staged.
+				A real session graph, captured end-to-end from a live <b>google.adk</b> fleet run on GKE — Vertex
+				Gemini agents reasoning over MongoDB Atlas, Snowflake, and BigQuery. Every number below is read
+				back from the runtime: the agents and their scopes, the append-only belief log, the contradiction
+				that genuinely fired and how trust resolved it, the federated fetches, and a counterfactual branch.
+				Nothing here is staged.
 			</p>
 		</div>
 
@@ -166,6 +166,20 @@
 			<span>{snap.meta.llm_model}</span>
 			<span class="db-meta-sep">·</span>
 			<span>graph <code>{snap.meta.graph_id}</code></span>
+		</div>
+
+		<div class="db-live">
+			<span class="db-live-pulse"></span>
+			<div class="db-live-copy">
+				<strong>Drive it live.</strong>
+				<span
+					>The interactive demo conductor is running on GKE — prompt the six-agent fleet yourself
+					and watch the context graph, data access, and audit feed react in real time.</span
+				>
+			</div>
+			<a class="db-live-btn" href="http://34.24.243.248/" target="_blank" rel="noopener">
+				Open the live dashboard <span class="db-live-arrow">→</span>
+			</a>
 		</div>
 	</section>
 
@@ -254,7 +268,11 @@
 
 			<ul class="db-beliefs">
 				{#each snap.beliefs as b (b.agent + b.topic + b.turn)}
-					<li class="db-belief" class:superseded={b.superseded} class:winner={recon && b.agent === recon.winner && b.topic === recon.topic}>
+					<li
+						class="db-belief"
+						class:superseded={b.superseded}
+						class:winner={recon && b.agent === recon.winner && b.topic === recon.topic}
+					>
 						<span class="db-belief-topic">{b.topic}</span>
 						<span class="db-belief-claim">{b.claim}</span>
 						<span class="db-belief-agent">{b.agent}</span>
@@ -272,7 +290,8 @@
 						<span class="db-recon-k">Detected</span>
 						<span class="db-recon-v"
 							>two-pass · embedding cosine <b>{fmt(recon.similarity)}</b> → NLI
-							<b>contradiction</b> {fmt(recon.nli_confidence)} on <b>{recon.topic}</b></span
+							<b>contradiction</b>
+							{fmt(recon.nli_confidence)} on <b>{recon.topic}</b></span
 						>
 					</div>
 					<div class="db-recon-row">
@@ -332,8 +351,7 @@
 					<div class="db-denial-row">
 						<span class="db-recon-k">Denied</span>
 						<span class="db-recon-v"
-							><b>{snap.denial.agent}</b> requested <b>{snap.denial.denied_topic}</b> — outside its
-							remit</span
+							><b>{snap.denial.agent}</b> requested <b>{snap.denial.denied_topic}</b> — outside its remit</span
 						>
 					</div>
 					<div class="db-denial-row">
@@ -438,6 +456,80 @@
 		border-radius: 50%;
 		background: var(--accent);
 		box-shadow: 0 0 8px rgba(45, 199, 184, 0.6);
+	}
+
+	/* Live GKE demo banner */
+	.db-live {
+		display: flex;
+		align-items: center;
+		gap: 16px;
+		flex-wrap: wrap;
+		margin-top: 22px;
+		padding: 18px 22px;
+		border: 1px solid rgba(45, 199, 184, 0.35);
+		background: rgba(45, 199, 184, 0.05);
+	}
+	.db-live-pulse {
+		flex: 0 0 auto;
+		width: 9px;
+		height: 9px;
+		border-radius: 50%;
+		background: var(--accent);
+		box-shadow: 0 0 0 0 rgba(45, 199, 184, 0.5);
+		animation: db-live-pulse 2s ease-out infinite;
+	}
+	@keyframes db-live-pulse {
+		0% {
+			box-shadow: 0 0 0 0 rgba(45, 199, 184, 0.5);
+		}
+		70% {
+			box-shadow: 0 0 0 10px rgba(45, 199, 184, 0);
+		}
+		100% {
+			box-shadow: 0 0 0 0 rgba(45, 199, 184, 0);
+		}
+	}
+	.db-live-copy {
+		flex: 1 1 320px;
+	}
+	.db-live-copy strong {
+		display: block;
+		font-family: var(--f-sans);
+		font-weight: 500;
+		font-size: 15px;
+		text-transform: uppercase;
+		letter-spacing: 0.02em;
+		color: var(--fg);
+		margin-bottom: 3px;
+	}
+	.db-live-copy span {
+		font-family: var(--f-mono);
+		font-size: 11.5px;
+		line-height: 1.6;
+		color: var(--fg-3);
+	}
+	.db-live-btn {
+		flex: 0 0 auto;
+		display: inline-flex;
+		align-items: center;
+		gap: 10px;
+		padding: 11px 20px;
+		border: 1px solid var(--accent);
+		color: var(--accent);
+		text-decoration: none;
+		font-family: var(--f-mono);
+		font-size: 11.5px;
+		letter-spacing: 0.14em;
+		text-transform: uppercase;
+		font-weight: 600;
+		transition: all 0.2s;
+	}
+	.db-live-btn:hover {
+		background: var(--accent);
+		color: var(--bg);
+	}
+	.db-live-arrow {
+		font-size: 14px;
 	}
 
 	/* Stat row */

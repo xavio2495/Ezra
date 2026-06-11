@@ -2,38 +2,45 @@
 	import { onMount } from 'svelte';
 
 	let currentSlide = $state(0);
-	const TOTAL = 6;
+	const TOTAL = 7;
 
 	function goTo(n: number) {
-		currentSlide = n;
-		document.querySelector(`[data-slide="${n}"]`)?.scrollIntoView({ behavior: 'smooth' });
+		currentSlide = Math.max(0, Math.min(TOTAL - 1, n));
+	}
+	function next() {
+		goTo(currentSlide + 1);
+	}
+	function prev() {
+		goTo(currentSlide - 1);
+	}
+
+	// PowerPoint-style: click anywhere on the slide advances, unless the click
+	// landed on a real control (link / button).
+	function onDeckClick(e: MouseEvent) {
+		if ((e.target as HTMLElement).closest('a, button')) return;
+		next();
 	}
 
 	onMount(() => {
-		const slides = document.querySelectorAll<HTMLElement>('[data-slide]');
-
-		const io = new IntersectionObserver(
-			(entries) => {
-				entries.forEach((e) => {
-					if (e.isIntersecting && e.intersectionRatio >= 0.5) {
-						currentSlide = Number((e.target as HTMLElement).dataset.slide ?? 0);
-					}
-				});
-			},
-			{ threshold: 0.5 }
-		);
-		slides.forEach((s) => io.observe(s));
+		// Presentation mode: no page scroll, no footer (restored on navigate-away).
+		document.body.classList.add('pitch-mode');
 
 		const onKey = (e: KeyboardEvent) => {
-			if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
-				if (currentSlide < TOTAL - 1) goTo(currentSlide + 1);
-			} else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
-				if (currentSlide > 0) goTo(currentSlide - 1);
+			if (['ArrowDown', 'ArrowRight', 'PageDown', ' ', 'Enter'].includes(e.key)) {
+				e.preventDefault();
+				next();
+			} else if (['ArrowUp', 'ArrowLeft', 'PageUp'].includes(e.key)) {
+				e.preventDefault();
+				prev();
+			} else if (e.key === 'Home') {
+				goTo(0);
+			} else if (e.key === 'End') {
+				goTo(TOTAL - 1);
 			}
 		};
 		window.addEventListener('keydown', onKey);
 		return () => {
-			io.disconnect();
+			document.body.classList.remove('pitch-mode');
 			window.removeEventListener('keydown', onKey);
 		};
 	});
@@ -55,27 +62,43 @@
 	{/each}
 </nav>
 
-<div class="pitch-deck">
+<!-- Prev / next controls + counter -->
+<div class="slide-ctrl">
+	<button class="ctrl-btn" onclick={prev} disabled={currentSlide === 0} aria-label="Previous slide"
+		>‹</button
+	>
+	<span class="ctrl-count">{currentSlide + 1} / {TOTAL}</span>
+	<button
+		class="ctrl-btn"
+		onclick={next}
+		disabled={currentSlide === TOTAL - 1}
+		aria-label="Next slide">›</button
+	>
+</div>
+
+<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+<!-- (click-to-advance; full keyboard navigation is handled on window) -->
+<div class="pitch-deck" onclick={onDeckClick}>
 	<!-- 0: Cover -->
-	<section class="slide slide-cover" data-slide="0">
+	<section class="slide slide-cover" data-slide="0" class:active={currentSlide === 0}>
 		<div class="slide-inner">
 			<div class="slide-label">// Pre-Launch · June 2026</div>
 			<img src="/ezra-logo.svg" alt="Ezra" class="pitch-logo" />
 			<h1 class="slide-headline">The Multi-Agent<br /><em>Platform</em><br />for Enterprises.</h1>
 			<p class="slide-sub">Federation · Memory · Belief · Replay</p>
 			<div class="slide-meta-row">
-				<span>Hackathon Build</span>
+				<span>Live on GKE</span>
 				<span>·</span>
 				<span>MIT License</span>
 				<span>·</span>
-				<span>v0.1.0</span>
+				<span>v0.1.1 · PyPI / GHCR / Helm</span>
 			</div>
 		</div>
 		<button class="slide-next" onclick={() => goTo(1)}>Next ↓</button>
 	</section>
 
 	<!-- 1: Problem -->
-	<section class="slide" data-slide="1">
+	<section class="slide" data-slide="1" class:active={currentSlide === 1}>
 		<div class="slide-inner">
 			<div class="slide-label">01 / Problem</div>
 			<h2>Enterprise multi-agent AI<br />has a <em>coordination crisis.</em></h2>
@@ -117,7 +140,7 @@
 	</section>
 
 	<!-- 2: Solution -->
-	<section class="slide slide-teal" data-slide="2">
+	<section class="slide slide-teal" data-slide="2" class:active={currentSlide === 2}>
 		<div class="slide-inner">
 			<div class="slide-label">02 / Solution</div>
 			<h2>One runtime.<br /><em>Three layers.</em><br />Every agent.</h2>
@@ -151,7 +174,7 @@
 	</section>
 
 	<!-- 3: Architecture -->
-	<section class="slide" data-slide="3">
+	<section class="slide" data-slide="3" class:active={currentSlide === 3}>
 		<div class="slide-inner">
 			<div class="slide-label">03 / Architecture</div>
 			<h2>The 8-step router.<br />Per agent. <em>&lt;40ms.</em></h2>
@@ -172,7 +195,7 @@
 	</section>
 
 	<!-- 4: Differentiators -->
-	<section class="slide" data-slide="4">
+	<section class="slide" data-slide="4" class:active={currentSlide === 4}>
 		<div class="slide-inner">
 			<div class="slide-label">04 / Why Ezra</div>
 			<h2>Five things <em>no other</em><br />platform ships.</h2>
@@ -190,15 +213,58 @@
 		</div>
 	</section>
 
-	<!-- 5: The Ask -->
-	<section class="slide slide-cover slide-ask" data-slide="5">
+	<!-- 5: Landscape -->
+	<section class="slide slide-teal" data-slide="5" class:active={currentSlide === 5}>
+		<div class="slide-inner">
+			<div class="slide-label">05 / Landscape</div>
+			<h2>The layer <em>under</em><br />the frameworks.</h2>
+			<div class="pitch-land">
+				<div class="pl-row pl-head">
+					<span></span>
+					<span>They do</span>
+					<span>Ezra does</span>
+				</div>
+				<div class="pl-row">
+					<strong>MemGPT · Letta</strong>
+					<span>Self-editing memory for a single agent.</span>
+					<span
+						>Shared, permission-scoped memory and reconciled beliefs for the entire fleet — with a
+						versioned audit trail.</span
+					>
+				</div>
+				<div class="pl-row">
+					<strong>Langflow</strong>
+					<span>Visual builder for agent flows.</span>
+					<span>The cloud runtime those flows need underneath — state, federated data, audit.</span>
+				</div>
+				<div class="pl-row">
+					<strong>LangGraph · ADK</strong>
+					<span>Orchestration and control flow.</span>
+					<span>Plugs in as their state plane — a first-class Google ADK toolset ships today.</span>
+				</div>
+			</div>
+			<p class="pitch-land-note">
+				What MemGPT did for one agent's context window,
+				<strong>Ezra does for a fleet's shared state.</strong> Complementary to your orchestrator — not
+				another one.
+			</p>
+		</div>
+	</section>
+
+	<!-- 6: The Ask -->
+	<section class="slide slide-cover slide-ask" data-slide="6" class:active={currentSlide === 6}>
 		<div class="slide-inner slide-inner--center">
-			<div class="slide-label">05 / The Ask</div>
+			<div class="slide-label">06 / The Ask</div>
 			<h2>Join the<br /><em>early access</em><br />program.</h2>
 			<p class="slide-ask-p">
 				We are looking for two or three enterprise AI teams to co-build the production version. In
 				exchange: direct influence on the roadmap, priority support, and pre-launch pricing.
 			</p>
+			<div class="slide-ship">
+				<code>pip install ezra-client</code>
+				<code>docker pull ghcr.io/xavio2495/ezra-api:0.1.1</code>
+				<code>helm install ezra oci://ghcr.io/xavio2495/charts/ezra</code>
+			</div>
 			<div class="slide-ask-actions">
 				<a class="cta-btn" href="mailto:2495.immanuel@gmail.com"
 					>Book a Briefing <span class="arrow">→</span></a
@@ -211,30 +277,46 @@
 				<span>·</span>
 				<span>github.com/xavio2495/Ezra</span>
 				<span>·</span>
-				<span>v0.1.0 · MIT</span>
+				<span>v0.1.1 · MIT</span>
 			</div>
 		</div>
 	</section>
 </div>
 
 <style>
-	/* ── Deck ── */
+	/* ── Deck (presentation mode: one slide at a time, no scroll) ── */
 	.pitch-deck {
 		position: relative;
+		height: calc(100vh - var(--nav-h));
+		overflow: hidden;
 	}
 
 	.slide {
-		min-height: calc(100vh - var(--nav-h));
+		position: absolute;
+		inset: 0;
 		display: flex;
 		flex-direction: column;
 		justify-content: center;
 		align-items: center;
-		border-top: 1px solid var(--line);
-		scroll-snap-align: start;
-		position: relative;
+		overflow-y: auto;
+		opacity: 0;
+		visibility: hidden;
+		transform: translateX(28px);
+		pointer-events: none;
+		transition:
+			opacity 0.35s ease,
+			transform 0.35s ease,
+			visibility 0s linear 0.35s;
 	}
-	.slide:first-child {
-		border-top: 0;
+	.slide.active {
+		opacity: 1;
+		visibility: visible;
+		transform: none;
+		pointer-events: auto;
+		transition:
+			opacity 0.35s ease,
+			transform 0.35s ease,
+			visibility 0s;
 	}
 	.slide-cover {
 		background: radial-gradient(ellipse at 50% 40%, rgba(45, 199, 184, 0.07), transparent 60%);
@@ -365,6 +447,47 @@
 	}
 	.slide-dot:hover {
 		border-color: var(--accent);
+	}
+
+	/* ── Prev/next controls ── */
+	.slide-ctrl {
+		position: fixed;
+		right: 28px;
+		bottom: 24px;
+		z-index: 8;
+		display: flex;
+		align-items: center;
+		gap: 10px;
+	}
+	.ctrl-btn {
+		width: 34px;
+		height: 34px;
+		display: grid;
+		place-items: center;
+		background: rgba(2, 6, 23, 0.5);
+		border: 1px solid var(--line);
+		color: var(--fg-3);
+		font-size: 18px;
+		line-height: 1;
+		cursor: pointer;
+		transition: all 0.2s;
+		padding: 0;
+	}
+	.ctrl-btn:hover:not(:disabled) {
+		border-color: var(--accent);
+		color: var(--accent);
+	}
+	.ctrl-btn:disabled {
+		opacity: 0.3;
+		cursor: default;
+	}
+	.ctrl-count {
+		font-family: var(--f-mono);
+		font-size: 10px;
+		letter-spacing: 0.16em;
+		color: var(--fg-4);
+		min-width: 38px;
+		text-align: center;
 	}
 
 	/* ── Problem cards ── */
@@ -550,7 +673,84 @@
 		line-height: 1.6;
 	}
 
+	/* ── Landscape ── */
+	.pitch-land {
+		display: flex;
+		flex-direction: column;
+		border: 1px solid var(--line);
+		margin-top: 8px;
+	}
+	.pl-row {
+		display: grid;
+		grid-template-columns: 180px 1fr 1.3fr;
+		gap: 24px;
+		padding: 20px 28px;
+		border-bottom: 1px solid var(--line);
+		align-items: baseline;
+		transition: background 0.2s;
+	}
+	.pl-row:last-child {
+		border-bottom: 0;
+	}
+	.pl-row:hover {
+		background: rgba(45, 199, 184, 0.025);
+	}
+	.pl-head {
+		padding-top: 14px;
+		padding-bottom: 14px;
+	}
+	.pl-head span {
+		font-family: var(--f-mono);
+		font-size: 10px;
+		letter-spacing: 0.18em;
+		text-transform: uppercase;
+		color: var(--fg-4);
+	}
+	.pl-row strong {
+		font-family: var(--f-sans);
+		font-weight: 500;
+		font-size: 15px;
+		text-transform: uppercase;
+		color: var(--fg);
+		letter-spacing: 0.01em;
+	}
+	.pl-row span {
+		font-family: var(--f-mono);
+		font-size: 12px;
+		color: var(--fg-3);
+		line-height: 1.6;
+	}
+	.pl-row span:last-child {
+		color: var(--fg-2);
+	}
+	.pitch-land-note {
+		margin-top: 16px;
+		font-family: var(--f-mono);
+		font-size: 12px;
+		color: var(--fg-3);
+		line-height: 1.65;
+		max-width: 70ch;
+	}
+	.pitch-land-note strong {
+		color: var(--accent);
+	}
+
 	/* ── Ask ── */
+	.slide-ship {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+		align-items: center;
+		margin: 0 auto 32px;
+	}
+	.slide-ship code {
+		font-family: var(--f-mono);
+		font-size: 12px;
+		color: var(--accent);
+		background: rgba(45, 199, 184, 0.06);
+		border: 1px solid var(--line);
+		padding: 7px 16px;
+	}
 	.slide-ask-p {
 		font-size: 15px;
 		line-height: 1.7;
@@ -633,6 +833,13 @@
 		}
 		.pitch-router {
 			grid-template-columns: repeat(4, 1fr);
+		}
+		.pl-row {
+			grid-template-columns: 1fr;
+			gap: 8px;
+		}
+		.pl-head {
+			display: none;
 		}
 		.slide-nav {
 			display: none;
