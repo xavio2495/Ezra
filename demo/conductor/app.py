@@ -1,0 +1,497 @@
+"""FastAPI Demo Conductor (claude-docs/demo-dashboard-plan.md §4/§6).
+
+One process: spawns the F1 fleet into a session graph over a real ``Ezra``, runs a
+real Ezra turn per presenter prompt, performs the presenter ops (rewind / revert /
+branch), and streams ``message_event`` + ``audit`` SSE to the dashboard.
+
+Two turn modes:
+
+- **live** (GKE): the prompt drives a real ADK agent over Vertex Gemini
+  (``orchestrator._run_agent``) — the agent's LLM decides what to commit.
+- **offline** (dev, this machine has no GCP creds): ``service.complete`` runs the
+  full 8-step router turn against the in-memory runtime, and the commit the tuned
+  briefing *instructs* the agent to make is applied deterministically through the
+  same ``service.commit`` path — so detection, reconciliation, supersession, and
+  the audit feed are all the real platform, only the LLM is a stand-in.
+
+Honesty rule: every state change the UI shows flows from the persisted
+``AuditEvent`` feed; the conductor never invents events.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import re
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+from typing import Any, Optional
+
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+
+from demo.f1_race_weekend.adk_runtime.fleet import FLEET_ROLES, INHERITED_GRAPH, _mesh_for
+from demo.f1_race_weekend.agents.roles import role_by_id
+from ezra_core.audit.store import InMemoryAuditLog
+from ezra_core.policy.engine import PolicyDeniedError
+from ezra_core.runtime import Ezra
+from ezra_core.schemas.belief import MARKER_TYPES
+
+CONDUCTOR_GRAPH = "race-weekend-monaco-2026-demo"
+DEFAULT_TRUST = {"tyre_engineer": 0.95, "race_strategy": 0.80}
+
+# The tuned briefings (fleet.FLEET_PROMPTS / the chat pre-fills) spell out the
+# exact claim + topic the agent must commit. Offline mode parses that instruction
+# instead of asking an LLM to follow it.
+_EXACT_CLAIM = re.compile(r"EXACTLY this claim[^:]*:\s*'([^']+)'")
+# Bind the topic to the COMMIT instruction, not just any "topic '…'" — the
+# briefings also name a fetch topic (e.g. race_strategy fetches on 'strategy'
+# but commits on 'tyres').
+_COMMIT_TOPIC = re.compile(r"commit\w*[^.]*?on topic\s+'([^']+)'", re.IGNORECASE)
+_TOPIC = re.compile(r"topic\s+'([^']+)'")
+_WANTS_COMMIT = re.compile(r"\bcommit\b", re.IGNORECASE)
+
+
+class PromptBody(BaseModel):
+    text: str
+
+
+class RewindBody(BaseModel):
+    turn: int = 1
+    reason: str = "presenter rewind"
+
+
+class RevertBody(BaseModel):
+    commitment_id: Optional[str] = None
+    reason: str = "presenter revert"
+
+
+class BranchBody(BaseModel):
+    from_turn: int = 1
+    agent_id: str = "race_strategy"
+    new_claim: str = "wets called at lap 43"
+    topic: str = "tyres"
+
+
+class Conductor:
+    def __init__(self, ezra: Ezra, *, offline: bool) -> None:
+        self.ezra = ezra
+        self.offline = offline
+        self.graph = None
+        self.services: dict[str, Any] = {}
+        self.turn_index = 0
+        self.branch_count = 0
+        self.branches: list[dict] = []
+        self._start_lock = asyncio.Lock()
+        self._subscribers: set[asyncio.Queue] = set()
+        # The audit feed is the contract with the UI — make sure one exists even
+        # on a bare offline runtime (from_settings wires Mongo-backed one).
+        if self.ezra.audit_log is None:
+            self.ezra.audit_log = InMemoryAuditLog()
+
+    # -- SSE hub -------------------------------------------------------------- #
+    def subscribe(self) -> asyncio.Queue:
+        q: asyncio.Queue = asyncio.Queue()
+        self._subscribers.add(q)
+        return q
+
+    def unsubscribe(self, q: asyncio.Queue) -> None:
+        self._subscribers.discard(q)
+
+    def publish_message(self, payload: dict) -> None:
+        for q in self._subscribers:
+            q.put_nowait(payload)
+
+    async def audit_snapshot(self) -> list[dict]:
+        if self.graph is None:
+            return []
+        events = await self.ezra.audit_log.get_for_graph(CONDUCTOR_GRAPH, limit=1000)
+        return [e.model_dump(mode="json") for e in events]
+
+    # -- state readbacks (drive the tier + branch + revert-target views) ------ #
+    async def beliefs(self) -> list[dict]:
+        """The append-only commitment log (cold tier), turn-ordered. ``active``
+        = live in the current belief state; markers (revert/rewind) are flagged.
+        Drives the git-like branch graph, the revert-target picker, and the
+        cold-tier view."""
+        if self.graph is None:
+            return []
+        commits = await self.ezra.belief_store.get_all(CONDUCTOR_GRAPH)
+        out = []
+        for c in commits:
+            is_marker = c.type in MARKER_TYPES
+            out.append(
+                {
+                    "id": c.id,
+                    "agent_id": c.agent_id,
+                    "topic": c.topic,
+                    "claim": c.claim,
+                    "type": c.type,
+                    "turn_index": c.turn_index,
+                    "trust_score": c.trust_score,
+                    "superseded_by": c.superseded_by,
+                    "redacted": c.redacted,
+                    "is_marker": is_marker,
+                    "active": (c.superseded_by is None and not c.redacted and not is_marker),
+                    "created_at": c.created_at.isoformat(),
+                }
+            )
+        return out
+
+    async def tiers(self) -> dict:
+        """Snapshot of the three memory tiers for the viewer. Best-effort: a tier
+        being empty/unreachable yields ``{}``/``[]``, never an error. (Cold-tier
+        beliefs come from ``beliefs()``; here cold = its count.)"""
+        hot: dict[str, Any] = {}
+        warm: list[dict] = []
+        cold_beliefs = 0
+        if self.graph is not None:
+            for aid in self.services:
+                try:
+                    turns = await self.ezra.hot.get_turns(CONDUCTOR_GRAPH, aid)
+                    pinned = await self.ezra.hot.get_pinned_beliefs(CONDUCTOR_GRAPH, aid)
+                    if turns or pinned:
+                        hot[aid] = {"turns": turns, "pinned": pinned}
+                except Exception:
+                    pass
+            try:
+                client = self.ezra.warm._client
+                coll = self.ezra.warm._collection
+                if await client.collection_exists(coll):
+                    points, _ = await client.scroll(coll, limit=50, with_payload=True)
+                    warm = [p.payload for p in points if p.payload]
+            except Exception:
+                pass
+            try:
+                cold_beliefs = len(await self.ezra.belief_store.get_all(CONDUCTOR_GRAPH))
+            except Exception:
+                pass
+        return {"hot": hot, "warm": warm, "cold": {"belief_count": cold_beliefs}}
+
+    # -- presenter ops -------------------------------------------------------- #
+    async def start(self) -> dict:
+        if self.graph is None:
+            self.graph = await self.ezra.create_session_graph(
+                session_graph_id=CONDUCTOR_GRAPH,
+                description="Monaco GP live demo fleet (conductor)",
+                merge_strategy="highest_trust",
+                inherits_from=[INHERITED_GRAPH],
+            )
+            for role_id in FLEET_ROLES:
+                role = role_by_id(role_id)
+                self.services[role_id] = await self.ezra.spawn_agent(
+                    self.graph,
+                    agent_id=role.agent_id,
+                    permission_scope=role.permission_scope,
+                    role=role.role,
+                    mesh=_mesh_for(self.ezra, role_id),
+                )
+            # Seed per-topic trust BEFORE any turn so highest_trust has a defined
+            # winner on 'tyres' (same as fleet.run_fleet).
+            for reg in self.graph.active_agents:
+                if reg.agent_id in DEFAULT_TRUST:
+                    reg.trust_scores["tyres"] = DEFAULT_TRUST[reg.agent_id]
+            await self.ezra.graph_store.save(self.graph.record)
+        return {
+            "graph_id": CONDUCTOR_GRAPH,
+            "mode": "offline" if self.offline else "live",
+            "agents": [
+                {"id": r, "role": role_by_id(r).role, "scope": role_by_id(r).permission_scope}
+                for r in self.services
+            ],
+        }
+
+    async def prompt(self, agent_id: str, text: str) -> dict:
+        await self._ensure_started()
+        if agent_id not in self.services:
+            raise HTTPException(status_code=404, detail=f"unknown agent {agent_id!r}")
+        self.turn_index += 1
+        if self.offline:
+            payload = await self._offline_turn(agent_id, text, self.turn_index)
+        else:
+            payload = await self._live_turn(agent_id, text)
+        await self._remember(agent_id, text, payload)
+        self.publish_message(payload)
+        return payload
+
+    async def _ensure_started(self) -> None:
+        """Re-initialise the in-memory graph/services if this process doesn't have
+        them yet — the conductor's runtime state is per-pod, so a restart (or a
+        cold pod the browser still thinks is started) must transparently reload
+        from the persisted graph rather than 404/409 the presenter's ops."""
+        if self.graph is not None:
+            return
+        async with self._start_lock:
+            if self.graph is None:
+                await self.start()
+
+    async def _remember(self, agent_id: str, user_text: str, payload: dict) -> None:
+        """Record the turn into hot (recent turns) and, when it committed, a scoped
+        summary into warm — so both tiers visibly hold real activity. The live ADK
+        path skips the router's hot write-back, so the conductor fills it here.
+        Best-effort: a tier write must never fail the turn."""
+        try:
+            await self.ezra.hot.append_turn(
+                CONDUCTOR_GRAPH,
+                agent_id,
+                {
+                    "user_input": user_text[:200],
+                    "response": payload["text"],
+                    "committed": payload.get("committed"),
+                    "ts": payload["created_at"],
+                },
+            )
+        except Exception:
+            pass
+        committed = payload.get("committed")
+        if committed and self.ezra.warm is not None:
+            try:
+                from uuid import uuid4
+
+                from ezra_core.schemas.memory import WarmSummary
+
+                await self.ezra.warm.add(
+                    WarmSummary(
+                        id=uuid4().hex,
+                        session_graph_id=CONDUCTOR_GRAPH,
+                        agent_id=agent_id,
+                        summary=f"{role_by_id(agent_id).role} committed on '{committed['topic']}': {committed['claim']}",
+                        topics=[committed["topic"]],
+                        salience=0.8,
+                        created_at=datetime.now(timezone.utc),
+                    )
+                )
+            except Exception:
+                pass
+
+    async def _offline_turn(self, agent_id: str, text: str, turn_index: int) -> dict:
+        service = self.services[agent_id]
+        result = await service.complete(text)  # real 8-step router turn (stand-in LLM)
+        response = result.response
+        committed = None
+        topic_match = _COMMIT_TOPIC.search(text) or _TOPIC.search(text)
+        if topic_match and _WANTS_COMMIT.search(text):
+            topic = topic_match.group(1)
+            claim_match = _EXACT_CLAIM.search(text)
+            claim = (
+                claim_match.group(1)
+                if claim_match
+                else f"{role_by_id(agent_id).role}: {topic} posture nominal."
+            )
+            try:
+                commit = await service.commit(claim, topic, turn_index=turn_index)
+                committed = {"topic": topic, "claim": commit.commitment.claim}
+                response = f"{response}\n[offline] committed on '{topic}': {claim}"
+            except PolicyDeniedError as exc:
+                response = f"{response}\n[offline] commit DENIED: {exc}"
+        return self._message(agent_id, response, committed)
+
+    async def _live_turn(self, agent_id: str, text: str) -> dict:
+        from demo.f1_race_weekend.adk_runtime.orchestrator import _run_agent
+
+        turn = await _run_agent(
+            self.services[agent_id],
+            role_by_id(agent_id),
+            text,
+            self.ezra.settings.llm_model,
+            self.ezra.settings.llm_api_key,
+        )
+        committed = (
+            {"topic": turn.committed[-1]["topic"], "claim": turn.committed[-1]["claim"]}
+            if turn.committed
+            else None
+        )
+        return self._message(agent_id, turn.response, committed)
+
+    def _message(self, agent_id: str, text: str, committed: Optional[dict]) -> dict:
+        return {
+            "agent_id": agent_id,
+            "role": "agent",
+            "text": text,
+            "committed": committed,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    async def rewind(self, turn: int, reason: str) -> dict:
+        await self._ensure_started()
+        service = self._any_service()
+        result = await service.rewind(turn, reason=reason)
+        return result.model_dump(mode="json")
+
+    async def revert(self, commitment_id: Optional[str], reason: str) -> dict:
+        await self._ensure_started()
+        target_id = commitment_id
+        owner = None
+        commitments = [
+            c
+            for c in await self.ezra.belief_store.get_active(CONDUCTOR_GRAPH)
+            if c.type not in MARKER_TYPES
+        ]
+        if target_id is None:
+            if not commitments:
+                raise HTTPException(status_code=409, detail="no active commitments to revert")
+            latest = max(commitments, key=lambda c: c.turn_index)
+            target_id, owner = latest.id, latest.agent_id
+        else:
+            owner = next((c.agent_id for c in commitments if c.id == target_id), None)
+        # Revert through the owning agent's service so the marker is honestly
+        # attributed; fall back to any service for an unknown owner.
+        service = self.services.get(owner) or self._any_service()
+        self.turn_index += 1
+        marker = await service.revert(target_id, reason=reason, turn_index=self.turn_index)
+        return {"reverted": target_id, "marker_id": marker.id}
+
+    async def branch(
+        self,
+        *,
+        from_turn: int = 1,
+        agent_id: str = "race_strategy",
+        new_claim: str = "wets called at lap 43",
+        topic: str = "tyres",
+    ) -> dict:
+        await self._ensure_started()
+        if self.ezra.branch_manager is None:
+            raise HTTPException(status_code=409, detail="branching not wired")
+        self.branch_count += 1
+        branch_id = f"{CONDUCTOR_GRAPH}-whatif-{self.branch_count}"
+        await self.ezra.branch_manager.branch_from(
+            session_graph_id=CONDUCTOR_GRAPH, turn=from_turn, branch_id=branch_id
+        )
+        await self.ezra.branch_manager.mutate_belief(
+            branch_id=branch_id,
+            agent_id=agent_id,
+            new_claim=new_claim,
+            topic=topic,
+            turn_index=from_turn + 1,
+        )
+        diff = await self.ezra.branch_manager.diff_branches(
+            original=CONDUCTOR_GRAPH, branch=branch_id, from_turn=from_turn
+        )
+        record = {
+            "branch_id": branch_id,
+            "from_turn": from_turn,
+            "counterfactual": {"agent_id": agent_id, "topic": topic, "claim": new_claim},
+            "diverged": diff.diverged_commitments,
+        }
+        self.branches.append(record)
+        return record
+
+    def _any_service(self):
+        if not self.services:
+            raise HTTPException(status_code=409, detail="fleet not started")
+        return next(iter(self.services.values()))
+
+
+def _sse(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+async def event_stream(conductor: Conductor, *, max_polls: Optional[int] = None):
+    """The ``/demo/stream`` SSE frames: the audit feed tailed ~every 500ms plus
+    queued ``message_event`` frames. ``max_polls`` bounds the loop for tests —
+    the endpoint streams unbounded (None). Kept module-level because an infinite
+    response can't be exercised through httpx's ASGITransport (it buffers the
+    full body, so a stream test over HTTP deadlocks)."""
+    q = conductor.subscribe()
+    cursor = 0
+    polls = 0
+    try:
+        yield ": connected\n\n"
+        while max_polls is None or polls < max_polls:
+            polls += 1
+            events = await conductor.audit_snapshot()
+            for event in events[cursor:]:
+                yield _sse("audit", event)
+            cursor = len(events)
+            try:
+                msg = await asyncio.wait_for(q.get(), timeout=0.5)
+                yield _sse("message_event", msg)
+            except asyncio.TimeoutError:
+                pass
+    finally:
+        conductor.unsubscribe(q)
+
+
+def create_app(ezra: Optional[Ezra] = None, *, offline: Optional[bool] = None) -> FastAPI:
+    """Build the conductor app. With no ``ezra``, wires the in-memory offline
+    runtime (no Atlas/Redis/Qdrant/Gemini) — pass ``Ezra.from_env()`` for live."""
+    owns_ezra = ezra is None
+    if ezra is None:
+        from examples._harness import build_offline_ezra
+
+        ezra = build_offline_ezra()
+        if offline is None:
+            offline = True
+    conductor = Conductor(ezra, offline=bool(offline))
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        yield
+        if owns_ezra:
+            await ezra.aclose()
+
+    app = FastAPI(title="Ezra Demo Conductor", lifespan=lifespan)
+    # Dev convenience: the Vite dev server runs on its own origin. In production
+    # the conductor serves the built UI itself (single origin on GKE).
+    app.add_middleware(
+        CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
+    )
+    app.state.conductor = conductor
+
+    @app.post("/demo/start")
+    async def start() -> dict:
+        return await conductor.start()
+
+    @app.post("/demo/agent/{agent_id}/prompt")
+    async def prompt(agent_id: str, body: PromptBody) -> dict:
+        return await conductor.prompt(agent_id, body.text)
+
+    @app.post("/demo/rewind")
+    async def rewind(body: Optional[RewindBody] = None) -> dict:
+        body = body or RewindBody()
+        return await conductor.rewind(body.turn, body.reason)
+
+    @app.post("/demo/revert")
+    async def revert(body: Optional[RevertBody] = None) -> dict:
+        body = body or RevertBody()
+        return await conductor.revert(body.commitment_id, body.reason)
+
+    @app.post("/demo/branch")
+    async def branch(body: Optional[BranchBody] = None) -> dict:
+        body = body or BranchBody()
+        return await conductor.branch(
+            from_turn=body.from_turn,
+            agent_id=body.agent_id,
+            new_claim=body.new_claim,
+            topic=body.topic,
+        )
+
+    @app.get("/demo/beliefs")
+    async def beliefs() -> list[dict]:
+        return await conductor.beliefs()
+
+    @app.get("/demo/tiers")
+    async def tiers() -> dict:
+        return await conductor.tiers()
+
+    @app.get("/demo/branches")
+    async def branches() -> list[dict]:
+        return conductor.branches
+
+    @app.get("/demo/stream")
+    async def stream() -> StreamingResponse:
+        return StreamingResponse(event_stream(conductor), media_type="text/event-stream")
+
+    # Single-origin: serve the built SvelteKit UI from the same process (so the
+    # browser hits one LoadBalancer IP, no CORS). Mounted LAST so the /demo API
+    # routes above take precedence; a no-op in dev where the UI isn't built.
+    ui_dir = os.getenv("EZRA_CONDUCTOR_UI_DIR", "ui")
+    if os.path.isdir(ui_dir):
+        from fastapi.staticfiles import StaticFiles
+
+        app.mount("/", StaticFiles(directory=ui_dir, html=True), name="ui")
+
+    return app
