@@ -14,7 +14,11 @@ from demo.conductor.app import create_app
 def main() -> None:
     if os.getenv("EZRA_CONDUCTOR_LIVE", "").lower() in ("1", "true", "yes"):
         from ezra_core.runtime import Ezra, gemini_checker
+        from ezra_core.secret_files import load_secret_files
 
+        # On GKE the Atlas URI + keys arrive as files from the Secret Manager CSI
+        # mount; load them into EZRA_* env before from_env reads settings.
+        load_secret_files()
         ezra = Ezra.from_env(build_checker=False)
         ezra.checker = gemini_checker(ezra.settings)
         app = create_app(ezra, offline=False)

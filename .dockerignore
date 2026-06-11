@@ -8,6 +8,9 @@ node_modules
 **/node_modules
 web/.svelte-kit
 web/build
+ezra-dashboard/.svelte-kit
+ezra-dashboard/build
+claude-docs.zip
 docs/jose
 secrets
 files.zip

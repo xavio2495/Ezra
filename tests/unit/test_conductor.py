@@ -7,6 +7,8 @@ contradiction (race_strategy softs → tyre_engineer hards) must detect, reconci
 via highest_trust, and land in the audit feed the dashboard derives from.
 """
 
+import asyncio
+
 import httpx
 import pytest
 
@@ -123,12 +125,22 @@ async def test_revert_rewind_and_branch_ops(app):
 async def test_stream_replays_audit_feed_as_sse(app):
     async with _client(app) as client:
         await client.post("/demo/start")
-        async with client.stream("GET", "/demo/stream") as res:
-            assert res.status_code == 200
-            assert res.headers["content-type"].startswith("text/event-stream")
-            buffer = ""
-            async for chunk in res.aiter_text():
-                buffer += chunk
-                if "event: audit" in buffer and "agent_spawned" in buffer:
-                    break
-            assert "event: audit" in buffer
+
+    # The SSE body is an unbounded generator; httpx's in-process ASGITransport
+    # buffers an infinite response and never yields, so drive the real generator
+    # directly and stop once the spawned fleet has replayed as `audit` frames.
+    conductor = app.state.conductor
+    frames: list[str] = []
+    stream = conductor.event_stream()
+    try:
+        while True:
+            chunk = await asyncio.wait_for(stream.__anext__(), timeout=5)
+            frames.append(chunk)
+            if "event: audit" in chunk and "agent_spawned" in chunk:
+                break
+    finally:
+        await stream.aclose()
+
+    joined = "".join(frames)
+    assert joined.startswith(": connected")
+    assert "event: audit" in joined and "agent_spawned" in joined

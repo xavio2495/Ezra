@@ -1,0 +1,40 @@
+# Demo Conductor image — the all-in-one live-demo service. Stage 1 builds the
+# SvelteKit dashboard (ezra-dashboard) to a static SPA; stage 2 is the fleet
+# runtime that runs the F1 fleet in-process over a real Ezra AND serves that UI
+# single-origin (FastAPI StaticFiles), so the browser hits one LoadBalancer IP.
+# Carries the `agents` (google-adk) + `ingest` (snowflake/bigquery/fastf1) deps;
+# NO `ml` group (live uses the Gemini-backed NLI checker, no torch). The 2.0
+# Flash family is retired — live runs on vertex_ai/gemini-2.5-flash (keyless WIF).
+# Build from the repo root:
+#   docker build -f deploy/docker/Dockerfile.conductor -t <registry>/ezra-conductor:<tag> .
+
+# --- Stage 1: build the dashboard UI ---
+FROM node:20-bookworm-slim AS ui
+WORKDIR /ui
+COPY ezra-dashboard/package.json ezra-dashboard/package-lock.json ./
+RUN npm ci
+COPY ezra-dashboard/ ./
+RUN npm run build
+
+# --- Stage 2: python runtime (fleet + conductor + UI) ---
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+
+ENV UV_LINK_MODE=copy \
+    UV_PROJECT_ENVIRONMENT=/opt/venv \
+    UV_COMPILE_BYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH="/opt/venv/bin:$PATH" \
+    EZRA_CONDUCTOR_UI_DIR=/app/ui \
+    PORT=8090
+
+WORKDIR /app
+
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --group agents --group ingest
+
+COPY ezra_core ./ezra_core
+COPY demo ./demo
+COPY --from=ui /ui/build ./ui
+
+EXPOSE 8090
+CMD ["python", "-m", "demo.conductor"]

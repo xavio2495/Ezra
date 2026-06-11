@@ -1,0 +1,98 @@
+# Demo Conductor: runs the F1 fleet in-process over a real Ezra (live mode,
+# Vertex Gemini, keyless via Workload Identity) AND serves the dashboard UI
+# single-origin. Exposes its own LoadBalancer IP for the presenter's browser.
+# Reuses the WIF-bound `ezra-api` KSA, the Secret Manager CSI mount, and the
+# ezra-config ConfigMap (same Atlas/Redis/Qdrant/Snowflake/BigQuery wiring as the
+# fleet Job). Apply on demand (NOT in kustomization):
+#   kubectl apply -f deploy/k8s/conductor.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ezra-conductor
+  namespace: ezra
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ezra-conductor
+  template:
+    metadata:
+      labels:
+        app: ezra-conductor
+    spec:
+      serviceAccountName: ezra-api
+      containers:
+        - name: ezra-conductor
+          # Overridden by the deploy script / kustomize images:.
+          image: us-east1-docker.pkg.dev/ezra-498021/ezra/ezra-conductor:latest
+          ports:
+            - containerPort: 8090
+          envFrom:
+            - configMapRef:
+                name: ezra-config
+          env:
+            - name: EZRA_CONDUCTOR_LIVE
+              value: "1"
+            - name: EZRA_GCP_PROJECT_ID
+              value: "ezra-498021"
+            # Gemini via Vertex AI (keyless ADC / Workload Identity); AI Studio
+            # keys are blocked from GCP egress IPs.
+            - name: EZRA_LLM_MODEL
+              value: "vertex_ai/gemini-2.5-flash"
+            - name: EZRA_META_AGENT_MODEL
+              value: "vertex_ai/gemini-2.5-flash"
+            - name: EZRA_EMBEDDING_MODEL
+              value: "vertex_ai/text-embedding-005"
+            - name: VERTEXAI_PROJECT
+              value: "ezra-498021"
+            - name: VERTEXAI_LOCATION
+              value: "us-central1"
+            - name: GOOGLE_GENAI_USE_VERTEXAI
+              value: "true"
+            - name: GOOGLE_CLOUD_PROJECT
+              value: "ezra-498021"
+            - name: GOOGLE_CLOUD_LOCATION
+              value: "us-central1"
+          volumeMounts:
+            - name: secrets-store
+              mountPath: /mnt/secrets-store
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /openapi.json
+              port: 8090
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /openapi.json
+              port: 8090
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 250m
+              memory: 768Mi
+            limits:
+              cpu: "1"
+              memory: 2Gi
+      volumes:
+        - name: secrets-store
+          csi:
+            driver: secrets-store-gke.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: ezra-secrets
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ezra-conductor
+  namespace: ezra
+spec:
+  type: LoadBalancer
+  selector:
+    app: ezra-conductor
+  ports:
+    - port: 80
+      targetPort: 8090
