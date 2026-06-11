@@ -7,12 +7,10 @@ contradiction (race_strategy softs → tyre_engineer hards) must detect, reconci
 via highest_trust, and land in the audit feed the dashboard derives from.
 """
 
-import asyncio
-
 import httpx
 import pytest
 
-from demo.conductor.app import CONDUCTOR_GRAPH, create_app
+from demo.conductor.app import CONDUCTOR_GRAPH, create_app, event_stream
 from demo.f1_race_weekend.adk_runtime.fleet import FLEET_PROMPTS
 
 
@@ -122,25 +120,23 @@ async def test_revert_rewind_and_branch_ops(app):
     assert "belief_rewound" in kinds
 
 
-async def test_stream_replays_audit_feed_as_sse(app):
+async def test_stream_emits_audit_and_message_frames(app):
+    """Consume the SSE generator directly with a bounded poll count — an
+    unbounded ``GET /demo/stream`` can't be read through ASGITransport (it
+    buffers the entire body, which never ends)."""
     async with _client(app) as client:
         await client.post("/demo/start")
 
-    # The SSE body is an unbounded generator; httpx's in-process ASGITransport
-    # buffers an infinite response and never yields, so drive the real generator
-    # directly and stop once the spawned fleet has replayed as `audit` frames.
     conductor = app.state.conductor
     frames: list[str] = []
-    stream = conductor.event_stream()
-    try:
-        while True:
-            chunk = await asyncio.wait_for(stream.__anext__(), timeout=5)
-            frames.append(chunk)
-            if "event: audit" in chunk and "agent_spawned" in chunk:
-                break
-    finally:
-        await stream.aclose()
+    async for frame in event_stream(conductor, max_polls=3):
+        frames.append(frame)
+        if frame.startswith(": connected"):
+            # The subscriber queue exists once the generator starts — publish a
+            # chat message so a message_event frame lands within the poll budget.
+            conductor.publish_message(
+                {"agent_id": "weather_model", "role": "agent", "text": "hello"}
+            )
 
-    joined = "".join(frames)
-    assert joined.startswith(": connected")
-    assert "event: audit" in joined and "agent_spawned" in joined
+    assert any("event: audit" in f and "agent_spawned" in f for f in frames)
+    assert any(f.startswith("event: message_event") for f in frames)
