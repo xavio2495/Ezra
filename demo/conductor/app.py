@@ -69,6 +69,13 @@ class RevertBody(BaseModel):
     reason: str = "presenter revert"
 
 
+class BranchBody(BaseModel):
+    from_turn: int = 1
+    agent_id: str = "race_strategy"
+    new_claim: str = "wets called at lap 43"
+    topic: str = "tyres"
+
+
 class Conductor:
     def __init__(self, ezra: Ezra, *, offline: bool) -> None:
         self.ezra = ezra
@@ -77,6 +84,8 @@ class Conductor:
         self.services: dict[str, Any] = {}
         self.turn_index = 0
         self.branch_count = 0
+        self.branches: list[dict] = []
+        self._start_lock = asyncio.Lock()
         self._subscribers: set[asyncio.Queue] = set()
         # The audit feed is the contract with the UI — make sure one exists even
         # on a bare offline runtime (from_settings wires Mongo-backed one).
@@ -101,6 +110,66 @@ class Conductor:
             return []
         events = await self.ezra.audit_log.get_for_graph(CONDUCTOR_GRAPH, limit=1000)
         return [e.model_dump(mode="json") for e in events]
+
+    # -- state readbacks (drive the tier + branch + revert-target views) ------ #
+    async def beliefs(self) -> list[dict]:
+        """The append-only commitment log (cold tier), turn-ordered. ``active``
+        = live in the current belief state; markers (revert/rewind) are flagged.
+        Drives the git-like branch graph, the revert-target picker, and the
+        cold-tier view."""
+        if self.graph is None:
+            return []
+        commits = await self.ezra.belief_store.get_all(CONDUCTOR_GRAPH)
+        out = []
+        for c in commits:
+            is_marker = c.type in MARKER_TYPES
+            out.append(
+                {
+                    "id": c.id,
+                    "agent_id": c.agent_id,
+                    "topic": c.topic,
+                    "claim": c.claim,
+                    "type": c.type,
+                    "turn_index": c.turn_index,
+                    "trust_score": c.trust_score,
+                    "superseded_by": c.superseded_by,
+                    "redacted": c.redacted,
+                    "is_marker": is_marker,
+                    "active": (c.superseded_by is None and not c.redacted and not is_marker),
+                    "created_at": c.created_at.isoformat(),
+                }
+            )
+        return out
+
+    async def tiers(self) -> dict:
+        """Snapshot of the three memory tiers for the viewer. Best-effort: a tier
+        being empty/unreachable yields ``{}``/``[]``, never an error. (Cold-tier
+        beliefs come from ``beliefs()``; here cold = its count.)"""
+        hot: dict[str, Any] = {}
+        warm: list[dict] = []
+        cold_beliefs = 0
+        if self.graph is not None:
+            for aid in self.services:
+                try:
+                    turns = await self.ezra.hot.get_turns(CONDUCTOR_GRAPH, aid)
+                    pinned = await self.ezra.hot.get_pinned_beliefs(CONDUCTOR_GRAPH, aid)
+                    if turns or pinned:
+                        hot[aid] = {"turns": turns, "pinned": pinned}
+                except Exception:
+                    pass
+            try:
+                client = self.ezra.warm._client
+                coll = self.ezra.warm._collection
+                if await client.collection_exists(coll):
+                    points, _ = await client.scroll(coll, limit=50, with_payload=True)
+                    warm = [p.payload for p in points if p.payload]
+            except Exception:
+                pass
+            try:
+                cold_beliefs = len(await self.ezra.belief_store.get_all(CONDUCTOR_GRAPH))
+            except Exception:
+                pass
+        return {"hot": hot, "warm": warm, "cold": {"belief_count": cold_beliefs}}
 
     # -- presenter ops -------------------------------------------------------- #
     async def start(self) -> dict:
@@ -136,6 +205,7 @@ class Conductor:
         }
 
     async def prompt(self, agent_id: str, text: str) -> dict:
+        await self._ensure_started()
         if agent_id not in self.services:
             raise HTTPException(status_code=404, detail=f"unknown agent {agent_id!r}")
         self.turn_index += 1
@@ -143,8 +213,59 @@ class Conductor:
             payload = await self._offline_turn(agent_id, text, self.turn_index)
         else:
             payload = await self._live_turn(agent_id, text)
+        await self._remember(agent_id, text, payload)
         self.publish_message(payload)
         return payload
+
+    async def _ensure_started(self) -> None:
+        """Re-initialise the in-memory graph/services if this process doesn't have
+        them yet — the conductor's runtime state is per-pod, so a restart (or a
+        cold pod the browser still thinks is started) must transparently reload
+        from the persisted graph rather than 404/409 the presenter's ops."""
+        if self.graph is not None:
+            return
+        async with self._start_lock:
+            if self.graph is None:
+                await self.start()
+
+    async def _remember(self, agent_id: str, user_text: str, payload: dict) -> None:
+        """Record the turn into hot (recent turns) and, when it committed, a scoped
+        summary into warm — so both tiers visibly hold real activity. The live ADK
+        path skips the router's hot write-back, so the conductor fills it here.
+        Best-effort: a tier write must never fail the turn."""
+        try:
+            await self.ezra.hot.append_turn(
+                CONDUCTOR_GRAPH,
+                agent_id,
+                {
+                    "user_input": user_text[:200],
+                    "response": payload["text"],
+                    "committed": payload.get("committed"),
+                    "ts": payload["created_at"],
+                },
+            )
+        except Exception:
+            pass
+        committed = payload.get("committed")
+        if committed and self.ezra.warm is not None:
+            try:
+                from uuid import uuid4
+
+                from ezra_core.schemas.memory import WarmSummary
+
+                await self.ezra.warm.add(
+                    WarmSummary(
+                        id=uuid4().hex,
+                        session_graph_id=CONDUCTOR_GRAPH,
+                        agent_id=agent_id,
+                        summary=f"{role_by_id(agent_id).role} committed on '{committed['topic']}': {committed['claim']}",
+                        topics=[committed["topic"]],
+                        salience=0.8,
+                        created_at=datetime.now(timezone.utc),
+                    )
+                )
+            except Exception:
+                pass
 
     async def _offline_turn(self, agent_id: str, text: str, turn_index: int) -> dict:
         service = self.services[agent_id]
@@ -195,11 +316,13 @@ class Conductor:
         }
 
     async def rewind(self, turn: int, reason: str) -> dict:
+        await self._ensure_started()
         service = self._any_service()
         result = await service.rewind(turn, reason=reason)
         return result.model_dump(mode="json")
 
     async def revert(self, commitment_id: Optional[str], reason: str) -> dict:
+        await self._ensure_started()
         target_id = commitment_id
         owner = None
         commitments = [
@@ -221,25 +344,40 @@ class Conductor:
         marker = await service.revert(target_id, reason=reason, turn_index=self.turn_index)
         return {"reverted": target_id, "marker_id": marker.id}
 
-    async def branch(self) -> dict:
+    async def branch(
+        self,
+        *,
+        from_turn: int = 1,
+        agent_id: str = "race_strategy",
+        new_claim: str = "wets called at lap 43",
+        topic: str = "tyres",
+    ) -> dict:
+        await self._ensure_started()
         if self.ezra.branch_manager is None:
             raise HTTPException(status_code=409, detail="branching not wired")
         self.branch_count += 1
         branch_id = f"{CONDUCTOR_GRAPH}-whatif-{self.branch_count}"
         await self.ezra.branch_manager.branch_from(
-            session_graph_id=CONDUCTOR_GRAPH, turn=1, branch_id=branch_id
+            session_graph_id=CONDUCTOR_GRAPH, turn=from_turn, branch_id=branch_id
         )
         await self.ezra.branch_manager.mutate_belief(
             branch_id=branch_id,
-            agent_id="race_strategy",
-            new_claim="wets called at lap 43",
-            topic="tyres",
-            turn_index=2,
+            agent_id=agent_id,
+            new_claim=new_claim,
+            topic=topic,
+            turn_index=from_turn + 1,
         )
         diff = await self.ezra.branch_manager.diff_branches(
-            original=CONDUCTOR_GRAPH, branch=branch_id, from_turn=1
+            original=CONDUCTOR_GRAPH, branch=branch_id, from_turn=from_turn
         )
-        return {"branch_id": branch_id, "diverged": diff.diverged_commitments}
+        record = {
+            "branch_id": branch_id,
+            "from_turn": from_turn,
+            "counterfactual": {"agent_id": agent_id, "topic": topic, "claim": new_claim},
+            "diverged": diff.diverged_commitments,
+        }
+        self.branches.append(record)
+        return record
 
     def _any_service(self):
         if not self.services:
@@ -322,8 +460,26 @@ def create_app(ezra: Optional[Ezra] = None, *, offline: Optional[bool] = None) -
         return await conductor.revert(body.commitment_id, body.reason)
 
     @app.post("/demo/branch")
-    async def branch() -> dict:
-        return await conductor.branch()
+    async def branch(body: Optional[BranchBody] = None) -> dict:
+        body = body or BranchBody()
+        return await conductor.branch(
+            from_turn=body.from_turn,
+            agent_id=body.agent_id,
+            new_claim=body.new_claim,
+            topic=body.topic,
+        )
+
+    @app.get("/demo/beliefs")
+    async def beliefs() -> list[dict]:
+        return await conductor.beliefs()
+
+    @app.get("/demo/tiers")
+    async def tiers() -> dict:
+        return await conductor.tiers()
+
+    @app.get("/demo/branches")
+    async def branches() -> list[dict]:
+        return conductor.branches
 
     @app.get("/demo/stream")
     async def stream() -> StreamingResponse:

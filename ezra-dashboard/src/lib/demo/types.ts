@@ -39,3 +39,35 @@ export interface AgentInfo {
 }
 
 export type ConnectionState = 'disconnected' | 'connecting' | 'live';
+
+// GET /demo/beliefs — the append-only commitment log (cold tier). Drives the
+// branch graph, the revert-target picker, and the cold-tier view.
+export interface Belief {
+	id: string;
+	agent_id: string;
+	topic: string;
+	claim: string;
+	type: string;
+	turn_index: number;
+	trust_score: number;
+	superseded_by: string | null;
+	redacted: boolean;
+	is_marker: boolean;
+	active: boolean;
+	created_at: string;
+}
+
+// GET /demo/tiers — snapshot of the three memory tiers.
+export interface Tiers {
+	hot: Record<string, { turns: unknown[]; pinned: unknown[] }>;
+	warm: Record<string, unknown>[];
+	cold: { belief_count: number };
+}
+
+// GET /demo/branches — counterfactual branches the presenter created.
+export interface BranchRecord {
+	branch_id: string;
+	from_turn: number;
+	counterfactual: { agent_id: string; topic: string; claim: string };
+	diverged: { topic: string; only_in_original: string[]; only_in_branch: string[] }[];
+}

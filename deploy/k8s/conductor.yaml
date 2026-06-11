@@ -63,12 +63,18 @@ spec:
               port: 8090
             initialDelaySeconds: 5
             periodSeconds: 10
+            timeoutSeconds: 5
+          # Lenient: a long/blocking live Vertex turn can stall the event loop
+          # briefly; don't let the probe SIGKILL the pod (and lose its in-memory
+          # graph) mid-demo. ~3 min of failures before a restart.
           livenessProbe:
             httpGet:
               path: /openapi.json
               port: 8090
-            initialDelaySeconds: 15
-            periodSeconds: 20
+            initialDelaySeconds: 20
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 6
           resources:
             requests:
               cpu: 250m
