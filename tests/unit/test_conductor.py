@@ -10,7 +10,7 @@ via highest_trust, and land in the audit feed the dashboard derives from.
 import httpx
 import pytest
 
-from demo.conductor.app import CONDUCTOR_GRAPH, create_app
+from demo.conductor.app import CONDUCTOR_GRAPH, create_app, event_stream
 from demo.f1_race_weekend.adk_runtime.fleet import FLEET_PROMPTS
 
 
@@ -120,15 +120,23 @@ async def test_revert_rewind_and_branch_ops(app):
     assert "belief_rewound" in kinds
 
 
-async def test_stream_replays_audit_feed_as_sse(app):
+async def test_stream_emits_audit_and_message_frames(app):
+    """Consume the SSE generator directly with a bounded poll count — an
+    unbounded ``GET /demo/stream`` can't be read through ASGITransport (it
+    buffers the entire body, which never ends)."""
     async with _client(app) as client:
         await client.post("/demo/start")
-        async with client.stream("GET", "/demo/stream") as res:
-            assert res.status_code == 200
-            assert res.headers["content-type"].startswith("text/event-stream")
-            buffer = ""
-            async for chunk in res.aiter_text():
-                buffer += chunk
-                if "event: audit" in buffer and "agent_spawned" in buffer:
-                    break
-            assert "event: audit" in buffer
+
+    conductor = app.state.conductor
+    frames: list[str] = []
+    async for frame in event_stream(conductor, max_polls=3):
+        frames.append(frame)
+        if frame.startswith(": connected"):
+            # The subscriber queue exists once the generator starts — publish a
+            # chat message so a message_event frame lands within the poll budget.
+            conductor.publish_message(
+                {"agent_id": "weather_model", "role": "agent", "text": "hello"}
+            )
+
+    assert any("event: audit" in f and "agent_spawned" in f for f in frames)
+    assert any(f.startswith("event: message_event") for f in frames)

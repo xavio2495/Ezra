@@ -46,6 +46,10 @@ DEFAULT_TRUST = {"tyre_engineer": 0.95, "race_strategy": 0.80}
 # exact claim + topic the agent must commit. Offline mode parses that instruction
 # instead of asking an LLM to follow it.
 _EXACT_CLAIM = re.compile(r"EXACTLY this claim[^:]*:\s*'([^']+)'")
+# Bind the topic to the COMMIT instruction, not just any "topic '…'" — the
+# briefings also name a fetch topic (e.g. race_strategy fetches on 'strategy'
+# but commits on 'tyres').
+_COMMIT_TOPIC = re.compile(r"commit\w*[^.]*?on topic\s+'([^']+)'", re.IGNORECASE)
 _TOPIC = re.compile(r"topic\s+'([^']+)'")
 _WANTS_COMMIT = re.compile(r"\bcommit\b", re.IGNORECASE)
 
@@ -146,7 +150,7 @@ class Conductor:
         result = await service.complete(text)  # real 8-step router turn (stand-in LLM)
         response = result.response
         committed = None
-        topic_match = _TOPIC.search(text)
+        topic_match = _COMMIT_TOPIC.search(text) or _TOPIC.search(text)
         if topic_match and _WANTS_COMMIT.search(text):
             topic = topic_match.group(1)
             claim_match = _EXACT_CLAIM.search(text)
@@ -246,6 +250,32 @@ def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
+async def event_stream(conductor: Conductor, *, max_polls: Optional[int] = None):
+    """The ``/demo/stream`` SSE frames: the audit feed tailed ~every 500ms plus
+    queued ``message_event`` frames. ``max_polls`` bounds the loop for tests —
+    the endpoint streams unbounded (None). Kept module-level because an infinite
+    response can't be exercised through httpx's ASGITransport (it buffers the
+    full body, so a stream test over HTTP deadlocks)."""
+    q = conductor.subscribe()
+    cursor = 0
+    polls = 0
+    try:
+        yield ": connected\n\n"
+        while max_polls is None or polls < max_polls:
+            polls += 1
+            events = await conductor.audit_snapshot()
+            for event in events[cursor:]:
+                yield _sse("audit", event)
+            cursor = len(events)
+            try:
+                msg = await asyncio.wait_for(q.get(), timeout=0.5)
+                yield _sse("message_event", msg)
+            except asyncio.TimeoutError:
+                pass
+    finally:
+        conductor.unsubscribe(q)
+
+
 def create_app(ezra: Optional[Ezra] = None, *, offline: Optional[bool] = None) -> FastAPI:
     """Build the conductor app. With no ``ezra``, wires the in-memory offline
     runtime (no Atlas/Redis/Qdrant/Gemini) — pass ``Ezra.from_env()`` for live."""
@@ -296,24 +326,6 @@ def create_app(ezra: Optional[Ezra] = None, *, offline: Optional[bool] = None) -
 
     @app.get("/demo/stream")
     async def stream() -> StreamingResponse:
-        async def gen():
-            q = conductor.subscribe()
-            cursor = 0
-            try:
-                yield ": connected\n\n"
-                while True:
-                    events = await conductor.audit_snapshot()
-                    for event in events[cursor:]:
-                        yield _sse("audit", event)
-                    cursor = len(events)
-                    try:
-                        msg = await asyncio.wait_for(q.get(), timeout=0.5)
-                        yield _sse("message_event", msg)
-                    except asyncio.TimeoutError:
-                        pass
-            finally:
-                conductor.unsubscribe(q)
-
-        return StreamingResponse(gen(), media_type="text/event-stream")
+        return StreamingResponse(event_stream(conductor), media_type="text/event-stream")
 
     return app
