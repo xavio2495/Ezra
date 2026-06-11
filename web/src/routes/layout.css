@@ -1460,3 +1460,13 @@ footer {
   .doc-pager { flex-direction: column; }
   .doc-pager-link.next { margin-left: 0; text-align: left; }
 }
+
+/* ── PITCH PRESENTATION MODE ─────────────────────────────────────────────
+   Toggled by /pitch onMount: the deck is a fixed-viewport slide show —
+   no page scroll, no footer. Removed when navigating away. */
+body.pitch-mode {
+  overflow: hidden;
+}
+body.pitch-mode footer {
+  display: none;
+}
