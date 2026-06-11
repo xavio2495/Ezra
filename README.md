@@ -174,8 +174,14 @@ deploy/              Dockerfiles, Terraform, K8s manifests, Helm chart
 web/                 ezra128.vercel.app — marketing site + docs
 ```
 
-## Project status
+<br><br><br>
+<div align="center">
 
-Built for the **Google Cloud Rapid Agent Hackathon** (MongoDB partner track), June 2026. The platform is feature-complete and live-verified on GKE: the data, belief, and audit planes are real, the published artifacts above are pullable today, and the unit suite is green (274 passed). It is a hackathon-stage codebase — APIs may move; do your own security review before production use.
+<h3>Built By
 
-**License:** [MIT](LICENSE) · **Contact:** 2495.immanuel@gmail.com
+[Charles](https://github.com/charlesms1246) x [Immanuel](https://github.com/xavio2495)
+
+</h3>
+</div>
+
+---
